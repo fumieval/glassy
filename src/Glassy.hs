@@ -90,7 +90,11 @@ instance Glassy Key where
     f <- keyPress k
     return (f, guard (not b && f))
 
-data Auto s a = Auto s (s -> a) (Event a -> s -> s)
+data Auto s a = Auto
+    { autoInitial :: s
+    , autoView :: s -> a
+    , autoUpdate :: Event a -> s -> s
+    }
 
 instance Glassy a => Glassy (Auto s a) where
   type State (Auto s a) = (s, State a)
@@ -121,7 +125,7 @@ start a = withHolz $ do
   sh <- makeShader
   void $ retract $ runHolzT win
     $ ($ initialState a)
-    $ fix $ \self s -> (>>=self) $ withFrame $ do
+    $ fix $ \self s -> (>>=self) $ withFrame win $ do
       pos <- getCursorPos
       runShaderT sh $ do
         setOrthographic
