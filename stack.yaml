@@ -37,12 +37,14 @@ resolver: lts-9.0
 # will not be run. This is useful for tweaking upstream packages.
 packages:
 - '.'
-- '../holz'
-- '../extensible'
+- location:
+    git: https://github.com/fumieval/holz.git
+    commit: 714facfdc83d954f6ca3b41c548913d41d943d53
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
 extra-deps:
 - freetype2-0.1.2
+- holz-0
 
 # Override default flag values for local packages and extra-deps
 flags: {}
