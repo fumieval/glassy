@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns, TypeFamilies, ScopedTypeVariables, Rank2Types #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts, FlexibleInstances, DefaultSignatures #-}
+{-# LANGUAGE DataKinds, KindSignatures #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE LambdaCase #-}
@@ -133,7 +134,7 @@ start a = withHolz $ do
         (s', es) <- poll a s box
         draw a s' box
 
-newtype VRec xs = VRec { getVRec :: RecordOf Sized xs }
+newtype VRec (xs :: [Assoc Symbol *]) = VRec { getVRec :: RecordOf Sized xs }
 
 data Sized a = Sized !Float !a | Unsized !a
 

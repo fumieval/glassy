@@ -7,7 +7,7 @@ import Data.Extensible
 main :: IO ()
 main = start $ VRec
   $ #counter @= Auto
-      { autoInitial = 0
+      { autoInitial = 0 :: Int
       , autoView = \x -> (LMB, Show x)
       , autoUpdate = const (+1)
       }
