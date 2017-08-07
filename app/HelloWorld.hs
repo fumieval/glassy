@@ -1,6 +1,6 @@
 module Main where
 
-import qualified Glassy as G
+import Glassy
 
 main :: IO ()
-main = G.start "Hello, world"
+main = start $ Str "Hello, world"

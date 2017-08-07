@@ -16,12 +16,16 @@ cabal-version:       >=1.10
 library
   hs-source-dirs:      src
   exposed-modules:     Glassy
+  ghc-options:         -threaded -Wall
   build-depends:       base
     , holz
     , linear
     , extensible
     , transformers
     , profunctors
+    , lens
+    , mtl
+    , time
   default-language:    Haskell2010
 
 executable glassy-demo
