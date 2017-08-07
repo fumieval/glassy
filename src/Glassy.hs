@@ -7,7 +7,25 @@
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE LambdaCase #-}
-module Glassy where
+module Glassy (Glassy(..)
+  , start
+  , liftHolz
+  -- * Basic types
+  , Str(..)
+  , Glassy.Show(..)
+  , Fill(..)
+  , rgb
+  -- * Automata
+  , Auto(..)
+  -- * Layout
+  , VRec(..)
+  , Sized(..)
+  , WrapState(..)
+  , WrapEvent(..)
+  -- * Input
+  , LMB(..)
+  , TextBox(..))
+  where
 
 import Control.Concurrent (threadDelay)
 import Control.Lens
@@ -115,6 +133,16 @@ newtype Show a = Show { getShow :: a }
 
 instance Prelude.Show a => Glassy (Glassy.Show a) where
   poll (Show a) = poll $ Str $ show a
+
+newtype Fill = Fill { fillColor :: V4 Float }
+
+instance Glassy Fill where
+  poll (Fill bg) = do
+    Box p q <- askEff #box
+    return $ liftHolz $ draw identity $ rectangle bg p q
+
+rgb :: Float -> Float -> Float -> V4 Float
+rgb r g b = V4 r g b 1
 
 instance Glassy a => Glassy (Eff HolzEffs a) where
   type State (Eff HolzEffs a) = Maybe (State a)
@@ -240,6 +268,7 @@ instance Glassy LMB where
     when (not b && f && Box.isInside pos box) $ tellEff #event ()
     return (return ())
 
+-- A textbox (always active)
 newtype TextBox = TextBox String
 
 instance Glassy TextBox where

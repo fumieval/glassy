@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedLabels #-}
+{-# LANGUAGE OverloadedLabels, OverloadedStrings #-}
 module Main where
 
 import Glassy as G
@@ -11,5 +11,5 @@ main = start $ VRec
       , autoView = \x -> (LMB, Show x)
       , autoUpdate = \_any -> (+1)
       }
-  <: #hello @= Str "Hello, world"
+  <: #hello @= (Str "Hello, world", Fill $ rgb 0.6 0.44 0.41)
   <: nil
