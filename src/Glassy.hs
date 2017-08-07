@@ -56,8 +56,8 @@ type HolzEffs =
   , "font" >: ReaderEff Text.Renderer
   , "IO" >: IO]
 
-type GlassyEffs a = StateDef (State a)
-    ': ("event" >: WriterEff (Event a))
+type GlassyEffs s e = StateDef s
+    ': ("event" >: WriterEff e)
     ': HolzEffs
 
 class Glassy a where
@@ -70,7 +70,7 @@ class Glassy a where
   default initialState :: a -> ()
   initialState _ = ()
 
-  poll :: a -> Eff (GlassyEffs a) (Eff HolzEffs ())
+  poll :: a -> Eff (GlassyEffs (State a) (Event a)) (Eff HolzEffs ())
   poll _ = return $ return ()
 
 start :: forall a. Glassy a => a -> IO ()
@@ -196,21 +196,24 @@ instance Wrapper Sized where
 newtype WrapState a = WrapState { unwrapState :: State a }
 
 withSubbox :: (Monad m, Forall (KeyValue KnownSymbol Glassy) xs)
-  => Box V2 Float
+  => Bool -- horizontal?
+  -> Box V2 Float
   -> RecordOf Sized xs
   -> (forall x. Glassy (AssocValue x) => Membership xs x -> AssocValue x -> Box V2 Float -> m (h (AssocValue x)))
   -> m (RecordOf h xs)
-withSubbox (Box (V2 x0 y0) (V2 x1 y1)) rec k = flip evalStateT y0
+withSubbox horiz (Box (V2 x0 y0) (V2 x1 y1)) rec k = flip evalStateT y0
   $ hgenerateFor (Proxy :: Proxy (KeyValue KnownSymbol Glassy))
-  $ \i -> StateT $ \y ->
-    let (h, a) = case getField $ hindex rec i of
-              Sized f x -> (f * height, x)
-              Unsized x -> (freeRatio * height, x)
+  $ \i -> StateT $ \t ->
+    let (d, a) = case getField $ hindex rec i of
+              Sized f x -> (f * total, x)
+              Unsized x -> (freeRatio * total, x)
     in do
-      s' <- k i a $ Box (V2 x0 y) (V2 x1 (y + h))
-      return (Field s', y + h)
+      s' <- k i a $ if horiz
+        then Box (V2 t y0) (V2 (t + d) y1)
+        else Box (V2 x0 t) (V2 x1 (t + d))
+      return (Field s', t + d)
   where
-    height = y1 - y0
+    total = if horiz then x1 - x0 else y1 - y0
     freeRatio = (1 - reserve) / count
     (Sum reserve, Sum count) = hfoldMap (\c -> case getField c of
       Sized f _ -> (Sum f, Sum 0)
@@ -218,26 +221,35 @@ withSubbox (Box (V2 x0 y0) (V2 x1 y1)) rec k = flip evalStateT y0
 
 newtype WrapEvent a = WrapEvent { unwrapEvent :: Event a }
 
+initRec :: Forall (KeyValue KnownSymbol Glassy) xs
+  => RecordOf Sized xs -> RecordOf WrapState xs
+initRec rec = htabulateFor (Proxy :: Proxy (KeyValue KnownSymbol Glassy))
+  $ \i -> Field $ WrapState $ initialState $ case getField $ hindex rec i of
+    Sized _ a -> a
+    Unsized a -> a
+
+pollRec :: Forall (KeyValue KnownSymbol Glassy) xs
+  => Bool -> RecordOf Sized xs -> Eff (GlassyEffs (RecordOf WrapState xs)
+    (VariantOf WrapEvent xs)) (Eff HolzEffs ())
+pollRec horiz rec = do
+  box <- askEff #box
+  states <- get
+  (states', Endo act) <- runWriterT $ withSubbox horiz box rec $ \i a box' -> do
+    ((m, s'), es) <- lift $ localEff #box (const box')
+      $ castEff
+      $ enumWriterEff
+      $ poll a `runStateDef` unwrapState (getField $ hindex states i)
+    tell $ Endo $ (>> runReaderEff m box')
+    mapM_ (lift . tellEff #event . EmbedAt i . Field . WrapEvent) es
+    return $ WrapState s'
+  put states'
+  return $ castEff $ act $ return ()
+
 instance Forall (KeyValue KnownSymbol Glassy) xs => Glassy (VRec xs) where
   type State (VRec xs) = RecordOf WrapState xs
   type Event (VRec xs) = VariantOf WrapEvent xs
-  initialState (VRec rec) = htabulateFor (Proxy :: Proxy (KeyValue KnownSymbol Glassy))
-    $ \i -> Field $ WrapState $ initialState $ case getField $ hindex rec i of
-      Sized _ a -> a
-      Unsized a -> a
-  poll (VRec rec) = do
-    box <- askEff #box
-    states <- get
-    (states', Endo act) <- runWriterT $ withSubbox box rec $ \i a box' -> do
-      ((m, s'), es) <- lift $ localEff #box (const box')
-        $ castEff
-        $ enumWriterEff
-        $ poll a `runStateDef` unwrapState (getField $ hindex states i)
-      tell $ Endo $ (>> runReaderEff m box')
-      mapM_ (lift . tellEff #event . EmbedAt i . Field . WrapEvent) es
-      return $ WrapState s'
-    put states'
-    return $ castEff $ act $ return ()
+  initialState = initRec . getVRec
+  poll = pollRec False . getVRec
 
 instance (Glassy a, Glassy b) => Glassy (a, b) where
   type State (a, b) = (State a, State b)
