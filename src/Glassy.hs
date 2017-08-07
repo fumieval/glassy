@@ -10,7 +10,7 @@
 module Glassy where
 
 import Control.Concurrent (threadDelay)
-import Control.Lens ((??))
+import Control.Lens
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.State.Class
@@ -21,12 +21,12 @@ import Control.Monad.Writer
 import qualified Data.BoundingBox as Box
 import Data.Extensible hiding (State)
 import Data.Extensible.Effect.Default
-import Data.Profunctor
+import Data.List (foldl')
 import Data.Proxy
 import Data.Time.Clock
 import Data.Void
 import GHC.TypeLits
-import Graphics.Holz hiding (Chatter(..), draw)
+import Graphics.Holz
 import Linear
 import qualified Graphics.Holz.Text as Text
 import qualified System.Info as Info
@@ -76,8 +76,8 @@ start a = withHolz $ do
           setOrthographic
           getBoundingBox
         runReaderEff @ "box" ?? box $ do
-          draw <- pipeWriterEff @ "event" (const $ return ()) $ castEff $ poll a
-          castEff draw
+          m <- pipeWriterEff @ "event" (const $ return ()) $ castEff $ poll a
+          castEff m
       t1 <- liftIO getCurrentTime
       liftIO $ threadDelay $ floor $ (*1e6)
         $ 1 / 30 - (realToFrac (diffUTCTime t1 t0) :: Double)
@@ -123,9 +123,9 @@ instance Glassy a => Glassy (Eff HolzEffs a) where
   poll m = do
     a <- castEff m
     s <- maybe (initialState a) id <$> get
-    (draw, s') <- castEff $ runStateDef (poll a) s
+    (n, s') <- castEff $ runStateDef (poll a) s
     put $ Just s'
-    return draw
+    return n
 
 -- | A moore machine that handles events from the output
 data Auto s a = Auto
@@ -150,10 +150,10 @@ instance Glassy a => Glassy (Auto s a) where
   initialState (Auto s f _) = (s, initialState $ f s)
   poll (Auto _ f u) = do
     (s, t) <- get
-    ((draw, t'), es) <- castEff $ enumWriterEff $ poll (f s) `runStateDef` t
+    ((m, t'), es) <- castEff $ enumWriterEff $ poll (f s) `runStateDef` t
     let !s' = foldr u s es
     put (s', t')
-    return draw
+    return m
 
 newtype RowRec (xs :: [Assoc Symbol *]) = RowRec { getRowRec :: RecordOf Sized xs }
 
@@ -201,11 +201,11 @@ instance Forall (KeyValue KnownSymbol Glassy) xs => Glassy (RowRec xs) where
     box <- askEff #box
     states <- get
     (states', Endo act) <- runWriterT $ withSubbox box rec $ \i a box' -> do
-      ((draw, s'), es) <- lift $ localEff #box (const box')
+      ((m, s'), es) <- lift $ localEff #box (const box')
         $ castEff
         $ enumWriterEff
         $ poll a `runStateDef` unwrapState (getField $ hindex states i)
-      tell $ Endo $ (>> runReaderEff draw box')
+      tell $ Endo $ (>> runReaderEff m box')
       mapM_ (lift . tellEff #event . EmbedAt i . Field . WrapEvent) es
       return $ WrapState s'
     put states'
@@ -239,3 +239,45 @@ instance Glassy LMB where
     pos <- liftHolz getCursorPos
     when (not b && f && Box.isInside pos box) $ tellEff #event ()
     return (return ())
+
+newtype TextBox = TextBox String
+
+instance Glassy TextBox where
+  type State TextBox = (String, Int)
+  initialState (TextBox str) = (str, length str)
+  poll (TextBox _) = do
+    Box (V2 x0 y0) (V2 x1 y1) <- askEff #box
+    xs <- liftHolz typedString
+    ks <- liftHolz typedKeys
+    (str, p) <- get
+    let move (V3 i j k) KeyBackspace = V3 (i + 1) j k
+        move (V3 i j k) KeyDelete = V3 i (j + 1) k
+        move (V3 i j k) KeyLeft = V3 i j (k - 1)
+        move (V3 i j k) KeyRight = V3 i j (k + 1)
+        move (V3 i j _) KeyHome = V3 i j 0
+        move (V3 i j _) KeyEnd = V3 i j (length str)
+        move v _ = v
+    let V3 i j k = foldl' move (V3 0 0 p) ks
+    let (l, r) = splitAt (p - i) str
+    let str' = l ++ xs ++ drop (i + j) r
+    let p' = length xs + k - i - j
+    put (str', p')
+    font <- askEff #font
+    return $ liftHolz $ font `Text.runRenderer` do
+      let fg = pure 1
+      let size = (y1 - y0) * 2 / 3
+      let (sl, sr) = splitAt p' str'
+      Text.string size fg sl
+      cursor <- Text.getOffset
+      Text.string size fg sr
+      V2 x y <- Text.getOffset
+      let c = min 1 $ (x1 - x0) / x
+      let mat = translate (V3 (x1 - 4 - c * x) (y0 + (y1 - y0) * 0.75 - c * y) 1)
+            !*! scaled (V4 c c c 1)
+
+      -- Draw a bar
+      lift $ draw (mat !*! (identity & translation . _xy .~ cursor))
+        $ rectangle (V4 0.5 0.5 0.5 0.8) (V2 (-size/24) (-size)) (V2 (size/24) 0)
+
+      Text.render mat
+      Text.clear
