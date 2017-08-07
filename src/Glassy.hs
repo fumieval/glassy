@@ -20,8 +20,15 @@ import Data.Void
 import System.IO.Unsafe
 import Data.Extensible hiding (State)
 import Control.Monad.Trans.State (StateT(..), evalStateT)
+import Control.Monad.Trans.Reader
 import GHC.TypeLits
 import Control.Monad.IO.Class
+
+type HolzEffs = ["holzWindow" >: ReaderEff Window
+  , "holzShader" >: ReaderEff Shader
+  , "holzFont" >: Text.Renderer
+  , "boundingbox" >: ReaderEff (Box V2 Float)
+  , "IO" >: IO]
 
 class Glassy a where
   type State a
@@ -33,18 +40,38 @@ class Glassy a where
   default initialState :: a -> ()
   initialState _ = ()
 
-  draw :: a -> State a -> Box V2 Float -> ShaderT (HolzT IO) (State a)
-  draw _ s _ = return s
+  poll :: (IncludeAssoc xs HolzEffs
+      , Associated xs (StateDef (State a)))
+      => a
+      -> Eff (("events" >: WriterEff (Event a)) ': xs) (Eff xs ())
+  poll _ _ _ = return $ return ()
 
-  poll :: a -> State a -> Box V2 Float -> ShaderT (HolzT IO) (State a, [Event a])
-  poll _ s _ = return (s, [])
+start :: forall a. Glassy a => a -> IO ()
+start a = withHolz $ do
+  win <- openWindow Windowed $ Box (V2 0 0) (V2 640 480)
+  sh <- makeShader
+  font <- Text.typewriter "/System/Library/Fonts/ヒラギノ角ゴシック W9.ttc"
+  retractEff @ "IO"
+      $ runReaderEff @ "holzWindow" ?? win
+      $ runStateEff @ "State" ?? initialState a
+      $ forever $ withFrame $ do
+          (draw, es) <- runWriterEff @ "events"
+              $ runReaderEff @ "holzShader" ?? sh
+              $ do
+                  liftHolz setOrthographic
+                  box <- liftHolz getBoundingBox
+                  runReaderEff @ "boundingbox" (poll a)
+          draw
 
-theTypewriter :: Text.Renderer
-theTypewriter = unsafePerformIO
-  $ Text.typewriter "/System/Library/Fonts/ヒラギノ角ゴシック W9.ttc"
+liftHolz :: IncludeAssoc xs HolzEffs => ShaderT (ReaderT Window IO) a -> Eff xs a
+liftHolz m = do
+  sh <- askEff #holzShader
+  win <- askEff #holzWindow
+  runShaderT sh m `runReaderT` win
 
+{-
 instance (c ~ Char) => Glassy [c] where
-  draw str _ (Box (V2 x0 y0) (V2 x1 y1)) = Text.runRenderer theTypewriter $ do
+  poll str _ (Box (V2 x0 y0) (V2 x1 y1)) = liftHolz $ Text.runRenderer theTypewriter $ do
     let size = (y1 - y0) * 2 / 3
     let fg = pure 1
     Text.string size fg str
@@ -120,20 +147,6 @@ instance (Glassy a, Glassy b) => Glassy (a, b) where
     (t', fs) <- poll b t box
     return ((s', t'), map Left es ++ map Right fs)
 
-start :: forall a. Glassy a => a -> IO ()
-start a = withHolz $ do
-  win <- openWindow Windowed $ Box (V2 0 0) (V2 640 480)
-  sh <- makeShader
-  void $ retract $ runHolzT win
-    $ ($ initialState a)
-    $ fix $ \self s -> (>>=self) $ withFrame win $ do
-      pos <- getCursorPos
-      runShaderT sh $ do
-        setOrthographic
-        box <- getBoundingBox
-        (s', es) <- poll a s box
-        draw a s' box
-
 newtype VRec (xs :: [Assoc Symbol *]) = VRec { getVRec :: RecordOf Sized xs }
 
 data Sized a = Sized !Float !a | Unsized !a
@@ -178,3 +191,4 @@ instance Forall (KeyValue KnownSymbol Glassy) xs => Glassy (VRec xs) where
     $ \i a -> fmap WrapState . draw a (unwrapState $ getField $ hindex states i)
   poll (VRec rec) states = (fmap (flip (,) []).)
     $ withSubbox rec $ \i a -> fmap (WrapState . fst) . poll a (unwrapState $ getField $ hindex states i)
+-}
