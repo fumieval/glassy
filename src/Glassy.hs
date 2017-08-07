@@ -18,6 +18,7 @@ import Control.Monad.Trans.Class
 import Control.Monad.Trans.Reader
 import Control.Monad.Trans.State (StateT(..), evalStateT)
 import Control.Monad.Writer
+import qualified Data.BoundingBox as Box
 import Data.Extensible hiding (State)
 import Data.Extensible.Effect.Default
 import Data.Profunctor
@@ -234,5 +235,7 @@ instance Glassy LMB where
     f <- liftHolz $ mousePress 0
     b <- get
     put f
-    when (not b && f) $ tellEff #event ()
+    box <- askEff #box
+    pos <- liftHolz getCursorPos
+    when (not b && f && Box.isInside pos box) $ tellEff #event ()
     return (return ())
