@@ -155,7 +155,7 @@ instance Glassy a => Glassy (Auto s a) where
     put (s', t')
     return m
 
-newtype RowRec (xs :: [Assoc Symbol *]) = RowRec { getRowRec :: RecordOf Sized xs }
+newtype VRec (xs :: [Assoc Symbol *]) = VRec { getVRec :: RecordOf Sized xs }
 
 data Sized a = Sized !Float !a | Unsized !a
 
@@ -190,14 +190,14 @@ withSubbox (Box (V2 x0 y0) (V2 x1 y1)) rec k = flip evalStateT y0
 
 newtype WrapEvent a = WrapEvent { unwrapEvent :: Event a }
 
-instance Forall (KeyValue KnownSymbol Glassy) xs => Glassy (RowRec xs) where
-  type State (RowRec xs) = RecordOf WrapState xs
-  type Event (RowRec xs) = VariantOf WrapEvent xs
-  initialState (RowRec rec) = htabulateFor (Proxy :: Proxy (KeyValue KnownSymbol Glassy))
+instance Forall (KeyValue KnownSymbol Glassy) xs => Glassy (VRec xs) where
+  type State (VRec xs) = RecordOf WrapState xs
+  type Event (VRec xs) = VariantOf WrapEvent xs
+  initialState (VRec rec) = htabulateFor (Proxy :: Proxy (KeyValue KnownSymbol Glassy))
     $ \i -> Field $ WrapState $ initialState $ case getField $ hindex rec i of
       Sized _ a -> a
       Unsized a -> a
-  poll (RowRec rec) = do
+  poll (VRec rec) = do
     box <- askEff #box
     states <- get
     (states', Endo act) <- runWriterT $ withSubbox box rec $ \i a box' -> do

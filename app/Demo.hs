@@ -5,7 +5,7 @@ import Glassy as G
 import Data.Extensible
 
 main :: IO ()
-main = start $ RowRec
+main = start $ VRec
   $ #counter @= Auto
       { autoInitial = 0 :: Int
       , autoView = \x -> (LMB, Show x)
