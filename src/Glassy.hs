@@ -18,6 +18,7 @@ module Glassy (Glassy(..)
   -- * Automata
   , Auto(..)
   -- * Layout
+  , Margin(..)
   , VRec(..)
   , Sized(..)
   , WrapState(..)
@@ -50,14 +51,14 @@ import qualified Graphics.Holz.Text as Text
 import qualified System.Info as Info
 
 type HolzEffs =
-  [ "box" >: ReaderEff (Box V2 Float)
-  , "holzShader" >: ReaderEff Shader
+  [ "holzShader" >: ReaderEff Shader
   , "holzWindow" >: ReaderEff Window
   , "font" >: ReaderEff Text.Renderer
   , "IO" >: IO]
 
 type GlassyEffs s e = StateDef s
     ': ("event" >: WriterEff e)
+    ': ("box" >: ReaderEff (Box V2 Float))
     ': HolzEffs
 
 class Glassy a where
@@ -114,18 +115,19 @@ liftHolz m = do
 newtype Str = Str String
 
 instance Glassy Str where
-  poll (Str str) = return $ do
+  poll (Str str) = do
     Box (V2 x0 y0) (V2 x1 y1) <- askEff #box
-    font <- askEff #font
-    liftHolz $ Text.runRenderer font $ do
-      let size = (y1 - y0) * 2 / 3
-      let fg = pure 1
-      Text.string size fg str
-      V2 x y <- Text.getOffset
-      let k = min 1 $ (x1 - x0) / x
-      Text.render $ translate (V3 (x1 - 4 - k * x) (y0 + (y1 - y0) * 0.75 - k * y) 1)
-        !*! scaled (V4 k k k 1)
-      Text.clear
+    return $ do
+      font <- askEff #font
+      liftHolz $ Text.runRenderer font $ do
+        let size = (y1 - y0) * 2 / 3
+        let fg = pure 1
+        Text.string size fg str
+        V2 x y <- Text.getOffset
+        let k = min 1 $ (x1 - x0) / x
+        Text.render $ translate (V3 (x1 - 4 - k * x) (y0 + (y1 - y0) * 0.75 - k * y) 1)
+          !*! scaled (V4 k k k 1)
+        Text.clear
 
 newtype Show a = Show { getShow :: a }
   deriving (Bounded, Enum, Eq, Floating, Fractional, Integral, Monoid, Num, Ord
@@ -239,7 +241,7 @@ pollRec horiz rec = do
       $ castEff
       $ enumWriterEff
       $ poll a `runStateDef` unwrapState (getField $ hindex states i)
-    tell $ Endo $ (>> runReaderEff m box')
+    tell $ Endo $ (>>m)
     mapM_ (lift . tellEff #event . EmbedAt i . Field . WrapEvent) es
     return $ WrapState s'
   put states'
@@ -263,6 +265,16 @@ instance (Glassy a, Glassy b) => Glassy (a, b) where
     put (s', t')
     mapM_ (tellEff #event) $ map Left es ++ map Right fs
     return (da >> db)
+
+data Margin a = MarginTRBL !Float !Float !Float !Float a
+
+instance Glassy a => Glassy (Margin a) where
+  type State (Margin a) = State a
+  type Event (Margin a) = Event a
+  initialState (MarginTRBL _ _ _ _ a) = initialState a
+  poll (MarginTRBL t r b l a) = localEff #box
+    (\(V2 x0 y0 `Box` V2 x1 y1) -> V2 (x0 + l) (y0 + t) `Box` V2 (x1 - r) (y1 - b))
+    (poll a)
 
 -- | Left mouse button
 data LMB = LMB
