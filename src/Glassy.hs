@@ -20,6 +20,7 @@ module Glassy (Glassy(..)
   -- * Layout
   , Margin(..)
   , VRec(..)
+  , HRec(..)
   , Sized(..)
   , WrapState(..)
   , WrapEvent(..)
@@ -203,7 +204,8 @@ withSubbox :: (Monad m, Forall (KeyValue KnownSymbol Glassy) xs)
   -> RecordOf Sized xs
   -> (forall x. Glassy (AssocValue x) => Membership xs x -> AssocValue x -> Box V2 Float -> m (h (AssocValue x)))
   -> m (RecordOf h xs)
-withSubbox horiz (Box (V2 x0 y0) (V2 x1 y1)) rec k = flip evalStateT y0
+withSubbox horiz (Box (V2 x0 y0) (V2 x1 y1)) rec k = flip evalStateT
+  (if horiz then x0 else y0)
   $ hgenerateFor (Proxy :: Proxy (KeyValue KnownSymbol Glassy))
   $ \i -> StateT $ \t ->
     let (d, a) = case getField $ hindex rec i of
@@ -252,6 +254,14 @@ instance Forall (KeyValue KnownSymbol Glassy) xs => Glassy (VRec xs) where
   type Event (VRec xs) = VariantOf WrapEvent xs
   initialState = initRec . getVRec
   poll = pollRec False . getVRec
+
+newtype HRec (xs :: [Assoc Symbol *]) = HRec { getHRec :: RecordOf Sized xs }
+
+instance Forall (KeyValue KnownSymbol Glassy) xs => Glassy (HRec xs) where
+  type State (HRec xs) = RecordOf WrapState xs
+  type Event (HRec xs) = VariantOf WrapEvent xs
+  initialState = initRec . getHRec
+  poll = pollRec True . getHRec
 
 instance (Glassy a, Glassy b) => Glassy (a, b) where
   type State (a, b) = (State a, State b)
