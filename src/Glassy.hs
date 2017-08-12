@@ -15,6 +15,7 @@ module Glassy (Glassy(..)
   , Glassy.Show(..)
   , Fill(..)
   , rgb
+  , Frame(..)
   -- * Automata
   , Auto(..)
   -- * Layout
@@ -129,6 +130,23 @@ instance Glassy Str where
         Text.render $ translate (V3 (x1 - 4 - k * x) (y0 + (y1 - y0) * 0.75 - k * y) 1)
           !*! scaled (V4 k k k 1)
         Text.clear
+
+-- | Hide overflow
+newtype Frame a = Frame { getFrame :: a }
+
+instance Glassy a => Glassy (Frame a) where
+  type State (Frame a) = State a
+  type Event (Frame a) = Event a
+  initialState (Frame a) = initialState a
+  poll (Frame a) = do
+    box@(Box (V2 x0 y0) (V2 x1 y1)) <- askEff #box
+    m <- poll a
+    return $ do
+      liftHolz $ do
+        setViewport box
+        setProjection $ ortho x0 x1 y1 y0 (-1) 1
+      m
+      liftHolz setOrthographic
 
 newtype Show a = Show { getShow :: a }
   deriving (Bounded, Enum, Eq, Floating, Fractional, Integral, Monoid, Num, Ord
@@ -291,7 +309,7 @@ data LMB = LMB
 
 instance Glassy LMB where
   type State LMB = Bool
-  type Event LMB = ()
+  type Event LMB = Bool
   initialState _ = False
   poll LMB = do
     f <- liftHolz $ mousePress 0
@@ -299,7 +317,7 @@ instance Glassy LMB where
     put f
     box <- askEff #box
     pos <- liftHolz getCursorPos
-    when (not b && f && Box.isInside pos box) $ tellEff #event ()
+    when (b /= f && Box.isInside pos box) $ tellEff #event f
     return (return ())
 
 -- A textbox (always active)
