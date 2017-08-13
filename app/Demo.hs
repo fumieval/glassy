@@ -6,22 +6,25 @@ import Data.Extensible
 import Linear
 import Control.Lens
 
+hover :: Float -> Float -> Float -> Auto Hover (Transit Fill)
+hover r g b = Auto
+  { autoWatch = Hover
+  , autoView = Transit 5
+    (fillRGBA r g b 0)
+    (fillRGBA r g b 1)
+  , autoUpdate = \case
+    True -> transitIn
+    False -> transitOut
+  }
+
 main :: IO ()
 main = start $ VRec
   $ #counter @= Auto
     { autoWatch = Down LMB
-    , autoView = Self (Show 0)
-    , autoUpdate = const $ self %~ (+1)
+    , autoView = (hover 0.4 0.52 0.33, Self (Show 0))
+    , autoUpdate = const $ _2 . self %~ (+1)
     }
-  <: #hello @= (Auto
-    { autoWatch = Hover
-    , autoView = Transit 5
-      (Fill $ V4 0.0 0.0 0.0 1)
-      (Fill $ V4 0.0 0.44 0.41 1)
-    , autoUpdate = \case
-      True -> transitIn
-      False -> transitOut
-    }
+  <: #hello @= (hover 0.5 0.3 0.2
     , HRec $ #h @= Str "Hello,"
       <: #w @= Str "World" <: nil)
   <: nil

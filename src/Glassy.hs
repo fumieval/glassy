@@ -14,7 +14,7 @@ module Glassy (Glassy(..)
   , Str(..)
   , Glassy.Show(..)
   , Fill(..)
-  , rgb
+  , fillRGBA
   , Frame(..)
   , Transit(..)
   , TransitionState(..)
@@ -193,8 +193,8 @@ instance Glassy Fill where
     Box p q <- askEff #box
     return $ liftHolz $ draw identity $ rectangle (bg & _xyz %~ fromHSV) p q
 
-rgb :: Float -> Float -> Float -> V4 Float
-rgb r g b = V4 r g b 1
+fillRGBA :: Float -> Float -> Float -> Float -> Fill
+fillRGBA r g b a = Fill $ let V3 h s v = toHSV (V3 r g b) in V4 h s v a
 
 instance Glassy a => Glassy (Eff HolzEffs a) where
   type State (Eff HolzEffs a) = Maybe (State a)
