@@ -36,7 +36,8 @@ module Glassy (Glassy(..)
   , Key(..)
   , Hover(..)
   , LMB(..)
-  , TextBox(..))
+  , TextBox(..)
+  , textBoxText)
   where
 
 import Control.Concurrent (threadDelay)
@@ -420,6 +421,10 @@ instance Glassy TextBox where
           (m, s') <- castEff $ activeTextBox `runStateDef` s
           put (Right s')
           return m
+
+textBoxText :: Lens' (State TextBox) String
+textBoxText f (Left s) = Left <$> f s
+textBoxText f (Right (s, i)) = f s <&> \s' -> Right (s', i)
 
 activeTextBox :: Eff (GlassyEffs (String, Int) Void) (Eff HolzEffs ())
 activeTextBox = do
