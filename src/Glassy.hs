@@ -30,6 +30,7 @@ module Glassy (Glassy(..)
   , WrapState(..)
   , WrapEvent(..)
   -- * Input
+  , Key(..)
   , Hover(..)
   , LMB(..)
   , TextBox(..))
@@ -314,6 +315,17 @@ instance Glassy a => Glassy (Margin a) where
   poll (MarginTRBL t r b l a) = localEff #box
     (\(V2 x0 y0 `Box` V2 x1 y1) -> V2 (x0 + l) (y0 + t) `Box` V2 (x1 - r) (y1 - b))
     (poll a)
+
+instance Glassy Key where
+  type State Key = Bool
+  type Event Key = Bool
+  initialState _ = False
+  poll k = do
+    f <- liftHolz $ keyPress k
+    b <- get
+    put f
+    when (b /= f) $ tellEff #event f
+    return (return ())
 
 -- | Left mouse button
 data LMB = LMB
