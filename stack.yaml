@@ -38,8 +38,11 @@ resolver: lts-9.0
 packages:
 - '.'
 - location:
-    git: https://github.com/fumieval/holz.git
-    commit: 714facfdc83d954f6ca3b41c548913d41d943d53
+   git: https://github.com/fumieval/extensible.git
+   commit: afb077ffe0400ef9d60c77c3adbf3b35f8b8edc4
+- location:
+   git: https://github.com/fumieval/holz.git
+   commit: af28c610bca247dea3e7fefd0da90a687cc977d8
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
 extra-deps:
