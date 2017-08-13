@@ -7,10 +7,10 @@ import Control.Lens
 import Linear
 
 main :: IO ()
-main = start $ Auto
+main = start $ (,) (fillRGBA 0.14 0.19 0.22 1) $ Auto
   { autoWatch = Down KeyEnter
   , autoView = VRec
-    $ #box @:> Sized 0.1 (fillRGBA 0.1 0.2 0.15 1, TextBox)
+    $ #box @:> Sized 0.1 (fillRGBA 0.5 0.5 0.55 1, TextBox)
     <: #list @:> Unsized (Self $ Rows
       $ map Str ["Turn my swag on"])
     <: nil
