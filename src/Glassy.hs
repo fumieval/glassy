@@ -188,8 +188,7 @@ data Auto s w a = Auto
   { autoInitial :: s -- ^ the initial state
   , autoWatch :: w -- ^ the target to watch
   , autoView :: s -> a -- ^ display
-  , autoUpdate :: Event w -> s -> s -- update its own state.
-  , autoOverride :: Event w -> State a -> State a -- ^ override the target's state.
+  , autoUpdate :: Event w -> (s, State a) -> (s, State a) -- update its own state.
   }
 
 pipeWriterEff :: forall k w xs a. (w -> Eff xs ())
@@ -205,13 +204,12 @@ enumWriterEff = peelEff1 (\a k -> return (a, k [])) (\(w, a) k f -> k a $ (w:) .
 instance (Glassy w, Glassy a) => Glassy (Auto s w a) where
   type State (Auto s w a) = (s, State w, State a)
   type Event (Auto s w a) = Event a
-  initialState (Auto s w f _ _) = (s, initialState w, initialState $ f s)
-  poll (Auto _ w f u o) = do
+  initialState (Auto s w f _) = (s, initialState w, initialState $ f s)
+  poll (Auto _ w f u) = do
     (s, ws, ts) <- get
     ((n, ws'), es) <- castEff $ enumWriterEff $ poll w `runStateDef` ws
     ((m, ts'), os) <- castEff $ enumWriterEff $ poll (f s) `runStateDef` ts
-    let !s' = foldr u s es
-    let !ts'' = foldr o ts' es
+    let (!s', !ts'') = foldr u (s, ts') es
     put (s', ws', ts'')
     mapM_ (tellEff #event) os
     return (n >> m)

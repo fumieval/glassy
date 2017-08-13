@@ -4,6 +4,7 @@ module Main where
 import Glassy as G
 import Data.Extensible
 import Linear
+import Control.Lens
 
 main :: IO ()
 main = start $ VRec
@@ -11,10 +12,9 @@ main = start $ VRec
       { autoInitial = 0 :: Int
       , autoWatch = LMB
       , autoView = Show
-      , autoUpdate = \case
+      , autoUpdate = \e -> _1 %~ case e of
         True -> (+1)
         _ -> id
-      , autoOverride = const id
       }
   <: #hello @= (Auto
       { autoInitial = ()
@@ -22,8 +22,7 @@ main = start $ VRec
       , autoView = const $ Transit 5
         (Fill $ V4 0.0 0.0 0.0 1)
         (Fill $ V4 0.0 0.44 0.41 1)
-      , autoUpdate = const id
-      , autoOverride = \case
+      , autoUpdate = \e -> _2 %~ case e of
         True -> transitIn
         False -> transitOut
       }
