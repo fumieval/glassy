@@ -91,7 +91,7 @@ class Glassy a where
 
 start :: forall a. Glassy a => a -> IO ()
 start a = withHolz $ do
-  win <- openWindow Windowed $ Box (V2 0 0) (V2 640 480)
+  win <- openWindow Resizable $ Box (V2 0 0) (V2 640 480)
   sh <- makeShader
   font <- case Info.os of
     "linux" -> Text.typewriter "/usr/share/fonts/truetype/takao-gothic/TakaoPGothic.ttf"
