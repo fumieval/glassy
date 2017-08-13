@@ -357,48 +357,65 @@ instance Glassy Hover where
     when (b /= f) $ tellEff #event f
     return $ return ()
 
--- A textbox (always active)
-newtype TextBox = TextBox String
+data TextBox = TextBox
 
 instance Glassy TextBox where
-  type State TextBox = (String, Int)
-  initialState (TextBox str) = (str, length str)
-  poll (TextBox _) = do
-    Box (V2 x0 y0) (V2 x1 y1) <- askEff #box
-    xs <- liftHolz typedString
-    ks <- liftHolz typedKeys
-    (str, p) <- get
-    let move (V3 i j k) KeyBackspace = V3 (i + 1) j k
-        move (V3 i j k) KeyDelete = V3 i (j + 1) k
-        move (V3 i j k) KeyLeft = V3 i j (k - 1)
-        move (V3 i j k) KeyRight = V3 i j (k + 1)
-        move (V3 i j _) KeyHome = V3 i j 0
-        move (V3 i j _) KeyEnd = V3 i j (length str)
-        move v _ = v
-    let V3 i j k = foldl' move (V3 0 0 p) ks
-    let (l, r) = splitAt (p - i) str
-    let str' = l ++ xs ++ drop (i + j) r
-    let p' = length xs + k - i - j
-    put (str', p')
-    font <- askEff #font
-    return $ liftHolz $ font `Text.runRenderer` do
-      let fg = pure 1
-      let size = (y1 - y0) * 2 / 3
-      let (sl, sr) = splitAt p' str'
-      Text.string size fg sl
-      cursor <- Text.getOffset
-      Text.string size fg sr
-      V2 x y <- Text.getOffset
-      let c = min 1 $ (x1 - x0) / x
-      let mat = translate (V3 (x1 - 4 - c * x) (y0 + (y1 - y0) * 0.75 - c * y) 1)
-            !*! scaled (V4 c c c 1)
+  type State TextBox = Either String (String, Int)
+  initialState TextBox = Left ""
+  poll TextBox = do
+    box <- askEff #box
+    cursorIsIn <- (`Box.isInside` box) <$> liftHolz getCursorPos
+    btn <- liftHolz $ mousePress 0
+    get >>= \case
+      Left str -> do
+        when (btn && cursorIsIn) $ put $ Right (str, length str)
+        castEff $ poll (Str str) `evalStateDef` ()
+      Right s@(str, _)
+        | btn && not cursorIsIn -> do
+          put (Left str)
+          castEff $ poll (Str str) `evalStateDef` ()
+        | otherwise -> do
+          (m, s') <- castEff $ activeTextBox `runStateDef` s
+          put (Right s')
+          return m
 
-      -- Draw a bar
-      lift $ draw (mat !*! (identity & translation . _xy .~ cursor))
-        $ rectangle (V4 0.5 0.5 0.5 0.8) (V2 (-size/24) (-size)) (V2 (size/24) 0)
+activeTextBox :: Eff (GlassyEffs (String, Int) Void) (Eff HolzEffs ())
+activeTextBox = do
+  Box (V2 x0 y0) (V2 x1 y1) <- askEff #box
+  xs <- liftHolz typedString
+  ks <- liftHolz typedKeys
+  (str, p) <- get
+  let move (V3 i j k) KeyBackspace = V3 (i + 1) j k
+      move (V3 i j k) KeyDelete = V3 i (j + 1) k
+      move (V3 i j k) KeyLeft = V3 i j (k - 1)
+      move (V3 i j k) KeyRight = V3 i j (k + 1)
+      move (V3 i j _) KeyHome = V3 i j 0
+      move (V3 i j _) KeyEnd = V3 i j (length str)
+      move v _ = v
+  let V3 i j k = foldl' move (V3 0 0 p) ks
+  let (l, r) = splitAt (p - i) str
+  let str' = l ++ xs ++ drop (i + j) r
+  let p' = length xs + k - i - j
+  put (str', p')
+  font <- askEff #font
+  return $ liftHolz $ font `Text.runRenderer` do
+    let fg = pure 1
+    let size = (y1 - y0) * 2 / 3
+    let (sl, sr) = splitAt p' str'
+    Text.string size fg sl
+    cursor <- Text.getOffset
+    Text.string size fg sr
+    V2 x y <- Text.getOffset
+    let c = min 1 $ (x1 - x0) / x
+    let mat = translate (V3 (x1 - 4 - c * x) (y0 + (y1 - y0) * 0.75 - c * y) 1)
+          !*! scaled (V4 c c c 1)
 
-      Text.render mat
-      Text.clear
+    -- Draw a bar
+    lift $ draw (mat !*! (identity & translation . _xy .~ cursor))
+      $ rectangle (V4 0.5 0.5 0.5 0.8) (V2 (-size/24) (-size)) (V2 (size/24) 0)
+
+    Text.render mat
+    Text.clear
 
 -- | transit with a shared state
 data Transit a = Transit !Int !a !a
