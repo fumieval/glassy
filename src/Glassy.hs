@@ -22,7 +22,6 @@ module Glassy (Glassy(..)
   , transitOut
   -- * Automata
   , Auto(..)
-  , Override(..)
   -- * Layout
   , Margin(..)
   , VRec(..)
@@ -184,11 +183,12 @@ instance Glassy a => Glassy (Eff HolzEffs a) where
     put $ Just s'
     return n
 
--- | A moore machine that handles events from the output
-data Auto s a = Auto
-  { autoInitial :: s
-  , autoView :: s -> a
-  , autoUpdate :: Event a -> s -> s
+data Auto s w a = Auto
+  { autoInitial :: s -- ^ the initial state
+  , autoWatch :: w -- ^ the target to watch
+  , autoView :: s -> a -- ^ display
+  , autoUpdate :: Event w -> s -> s -- update its own state.
+  , autoOverride :: Event w -> State a -> State a -- ^ override the target's state.
   }
 
 pipeWriterEff :: forall k w xs a. (w -> Eff xs ())
@@ -201,16 +201,19 @@ enumWriterEff :: forall k w xs a. Eff (k >: WriterEff w ': xs) a
 enumWriterEff = peelEff1 (\a k -> return (a, k [])) (\(w, a) k f -> k a $ (w:) . f)
   `flip` id
 
-instance Glassy a => Glassy (Auto s a) where
-  type State (Auto s a) = (s, State a)
-  type Event (Auto s a) = Event a
-  initialState (Auto s f _) = (s, initialState $ f s)
-  poll (Auto _ f u) = do
-    (s, t) <- get
-    ((m, t'), es) <- castEff $ enumWriterEff $ poll (f s) `runStateDef` t
+instance (Glassy w, Glassy a) => Glassy (Auto s w a) where
+  type State (Auto s w a) = (s, State w, State a)
+  type Event (Auto s w a) = Event a
+  initialState (Auto s w f _ _) = (s, initialState w, initialState $ f s)
+  poll (Auto _ w f u o) = do
+    (s, ws, ts) <- get
+    ((n, ws'), es) <- castEff $ enumWriterEff $ poll w `runStateDef` ws
+    ((m, ts'), os) <- castEff $ enumWriterEff $ poll (f s) `runStateDef` ts
     let !s' = foldr u s es
-    put (s', t')
-    return m
+    let !ts'' = foldr o ts' es
+    put (s', ws', ts'')
+    mapM_ (tellEff #event) os
+    return (n >> m)
 
 newtype VRec (xs :: [Assoc Symbol *]) = VRec { getVRec :: RecordOf Sized xs }
 
@@ -390,13 +393,13 @@ data Transit a = Transit !Int !a !a
 
 data TransitionState = TLeft | TIn !Float | TOut !Float | TRight
 
-transitIn :: TransitionState -> TransitionState
-transitIn (TOut i) = TIn i
-transitIn _ = TIn 0
+transitIn :: (TransitionState, a) -> (TransitionState, a)
+transitIn (TOut i, a) = (TIn i, a)
+transitIn (_, a) = (TIn 0, a)
 
-transitOut :: TransitionState -> TransitionState
-transitOut (TIn i) = TOut i
-transitOut _ = TOut 1
+transitOut :: (TransitionState, a) -> (TransitionState, a)
+transitOut (TIn i, a) = (TOut i, a)
+transitOut (_, a) = (TOut 1, a)
 
 instance (Glassy a, Transitive a) => Glassy (Transit a) where
   type State (Transit a) = (TransitionState, State a)
@@ -423,17 +426,3 @@ instance (Glassy a, Transitive a) => Glassy (Transit a) where
       (m, s') <- castEff $ runStateEff (poll b) s
       put (TRight, s')
       return m
-
-data Override a = Override
-  { overrideTarget :: a
-  , overrideState :: Event a -> State a -> State a }
-
-instance Glassy a => Glassy (Override a) where
-  type Event (Override a) = Event a
-  type State (Override a) = State a
-  initialState (Override a _) = initialState a
-  poll (Override a u) = do
-    s <- get
-    ((m, s'), es) <- castEff $ enumWriterEff $ poll a `runStateDef` s
-    put $! foldr u s' es
-    return m
