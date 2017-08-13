@@ -33,6 +33,7 @@ module Glassy (Glassy(..)
   , WrapState(..)
   , WrapEvent(..)
   -- * Input
+  , Chatter(..)
   , Key(..)
   , Hover(..)
   , LMB(..)
@@ -399,6 +400,21 @@ instance Glassy Hover where
     put f
     when (b /= f) $ tellEff #event f
     return $ return ()
+
+instance (Event a ~ Bool, Glassy a) => Glassy (Chatter a) where
+  type State (Chatter a) = State a
+  type Event (Chatter a) = ()
+  initialState (Up a) = initialState a
+  initialState (Down a) = initialState a
+  poll t = do
+    let (cond, a) = case t of
+          Up x -> (any not, x)
+          Down x -> (or, x)
+    s <- get
+    ((m, s'), es) <- castEff $ enumWriterEff @ "event" $ poll a `runStateDef` s
+    when (cond es) $ tellEff #event ()
+    put s'
+    return m
 
 data TextBox = TextBox
 
