@@ -21,8 +21,8 @@ main :: IO ()
 main = start $ VRec
   $ #counter @= Auto
     { autoWatch = Down LMB
-    , autoView = (hover 0.4 0.52 0.33, Self (Show 0))
-    , autoUpdate = const $ _2 . self %~ (+1)
+    , autoView = (hover 0.4 0.52 0.33, Show 0)
+    , autoUpdate = const $ _2 +~ 1
     }
   <: #hello @= (hover 0.5 0.3 0.2
     , HRec $ #h @= Str "Hello,"
