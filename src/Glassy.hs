@@ -24,8 +24,10 @@ module Glassy (Glassy(..)
   , self
   -- * Automata
   , Auto(..)
-  -- * Layout
+  -- * Collection
   , Rows(..)
+  , insertRows
+  -- * Layout
   , Margin(..)
   , VRec(..)
   , HRec(..)
@@ -38,7 +40,8 @@ module Glassy (Glassy(..)
   , Hover(..)
   , LMB(..)
   , TextBox(..)
-  , textBoxText)
+  , textBoxText
+  , clearTextBox)
   where
 
 import Control.Concurrent (threadDelay)
@@ -53,7 +56,7 @@ import Control.Monad.Writer
 import qualified Data.BoundingBox as Box
 import Data.Extensible hiding (State)
 import Data.Extensible.Effect.Default
-import Data.List (foldl', zip4)
+import Data.List (foldl')
 import Data.Proxy
 import Data.Time.Clock
 import Data.Void
@@ -167,22 +170,25 @@ instance Glassy a => Glassy (Frame a) where
       m
       liftHolz setOrthographic
 
-newtype Rows a = Rows { getRows :: [a] }
+data Rows a = Rows
+
+insertRows :: Glassy a => a -> [(a, State a)] -> [(a, State a)]
+insertRows a = ((a, initialState a):)
 
 instance Glassy a => Glassy (Rows a) where
-  type State (Rows a) = [State a]
+  type State (Rows a) = [(a, State a)]
   type Event (Rows a) = Event a
-  initialState = map initialState . getRows
-  poll (Rows xs) = do
+  initialState _ = []
+  poll Rows = do
     Box (V2 x0 y0) (V2 x1 y1) <- askEff #box
-    let h = (y1 - y0) / fromIntegral (length xs)
-    _ss <- get
+    ss <- get
+    let h = (y1 - y0) / fromIntegral (length ss)
     let ys = [y0, y0+h..]
-    (ms, ss') <- fmap unzip $ forM (zip4 ys (tail ys) xs $ map initialState xs) -- FIXME
-      $ \(y, y', a, s) -> castEff
+    (ms, ss') <- fmap unzip $ forM (zip3 ys (tail ys) ss)
+      $ \(y, y', (a, s)) -> castEff
         $ localEff #box (const $ Box (V2 x0 y) (V2 x1 y'))
         $ poll a `runStateDef` s
-    put ss'
+    put $ zip (map fst ss) ss'
     return $ sequence_ ms
 
 newtype Show a = Show { getShow :: a }
@@ -451,9 +457,13 @@ instance Glassy TextBox where
           put (Right s')
           return m
 
-textBoxText :: Lens' (State TextBox) String
-textBoxText f (Left s) = Left <$> f s
-textBoxText f (Right (s, i)) = f s <&> \s' -> Right (s', i)
+textBoxText :: State TextBox -> String
+textBoxText (Left s) = s
+textBoxText (Right (s, _)) = s
+
+clearTextBox :: State TextBox -> State TextBox
+clearTextBox (Left "") = Left ""
+clearTextBox (Right _) = Right ("", 0)
 
 activeTextBox :: Eff (GlassyEffs (String, Int) Void) (Eff HolzEffs ())
 activeTextBox = do
