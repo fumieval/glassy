@@ -23,6 +23,7 @@ module Glassy (Glassy(..)
   -- * Automata
   , Auto(..)
   -- * Layout
+  , Rows(..)
   , Margin(..)
   , VRec(..)
   , HRec(..)
@@ -48,7 +49,7 @@ import Control.Monad.Writer
 import qualified Data.BoundingBox as Box
 import Data.Extensible hiding (State)
 import Data.Extensible.Effect.Default
-import Data.List (foldl')
+import Data.List (foldl', zip4)
 import Data.Proxy
 import Data.Time.Clock
 import Data.Void
@@ -155,6 +156,24 @@ instance Glassy a => Glassy (Frame a) where
         setProjection $ ortho x0 x1 y1 y0 (-1) 1
       m
       liftHolz setOrthographic
+
+newtype Rows a = Rows { getRows :: [a] }
+
+instance Glassy a => Glassy (Rows a) where
+  type State (Rows a) = [State a]
+  type Event (Rows a) = Event a
+  initialState = map initialState . getRows
+  poll (Rows xs) = do
+    Box (V2 x0 y0) (V2 x1 y1) <- askEff #box
+    let h = (y1 - y0) / fromIntegral (length xs)
+    _ss <- get
+    let ys = [y0, y0+h..]
+    (ms, ss') <- fmap unzip $ forM (zip4 ys (tail ys) xs $ map initialState xs) -- FIXME
+      $ \(y, y', a, s) -> castEff
+        $ localEff #box (const $ Box (V2 x0 y) (V2 x1 y'))
+        $ poll a `runStateDef` s
+    put ss'
+    return $ sequence_ ms
 
 newtype Show a = Show { getShow :: a }
   deriving (Bounded, Enum, Eq, Floating, Fractional, Integral, Monoid, Num, Ord
