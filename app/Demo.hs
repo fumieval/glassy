@@ -11,7 +11,7 @@ main = start $ VRec
   $ #counter @= Auto
     { autoWatch = Down LMB
     , autoView = Self (Show 0)
-    , autoUpdate = const $ self %~ \(Show x) -> Show (x + 1)
+    , autoUpdate = const $ self %~ (+1)
     }
   <: #hello @= (Auto
     { autoWatch = Hover
