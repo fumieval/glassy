@@ -221,11 +221,10 @@ instance Glassy a => Glassy (Self a) where
 self :: Lens' (a, b) a
 self = _1
 
-data Auto s w a = Auto
-  { autoInitial :: s -- ^ the initial state
-  , autoWatch :: w -- ^ the target to watch
-  , autoView :: s -> a -- ^ display
-  , autoUpdate :: Event w -> (s, State a) -> (s, State a) -- update its own state.
+data Auto w a = Auto
+  { autoWatch :: w -- ^ the target to watch
+  , autoView :: a -- ^ display
+  , autoUpdate :: Event w -> State a -> State a -- update its own state.
   }
 
 pipeWriterEff :: forall k w xs a. (w -> Eff xs ())
@@ -238,16 +237,16 @@ enumWriterEff :: forall k w xs a. Eff (k >: WriterEff w ': xs) a
 enumWriterEff = peelEff1 (\a k -> return (a, k [])) (\(w, a) k f -> k a $ (w:) . f)
   `flip` id
 
-instance (Glassy w, Glassy a) => Glassy (Auto s w a) where
-  type State (Auto s w a) = (s, State w, State a)
-  type Event (Auto s w a) = Event a
-  initialState (Auto s w f _) = (s, initialState w, initialState $ f s)
-  poll (Auto _ w f u) = do
-    (s, ws, ts) <- get
+instance (Glassy w, Glassy a) => Glassy (Auto w a) where
+  type State (Auto w a) = (State w, State a)
+  type Event (Auto w a) = Event a
+  initialState (Auto w a _) = (initialState w, initialState a)
+  poll (Auto w v u) = do
+    (ws, vs) <- get
     ((n, ws'), es) <- castEff $ enumWriterEff $ poll w `runStateDef` ws
-    ((m, ts'), os) <- castEff $ enumWriterEff $ poll (f s) `runStateDef` ts
-    let (!s', !ts'') = foldr u (s, ts') es
-    put (s', ws', ts'')
+    let !vs' = foldr u vs es
+    ((m, vs''), os) <- castEff $ enumWriterEff $ poll v `runStateDef` vs'
+    put (ws', vs'')
     mapM_ (tellEff #event) os
     return (n >> m)
 

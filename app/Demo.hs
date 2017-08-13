@@ -9,20 +9,18 @@ import Control.Lens
 main :: IO ()
 main = start $ VRec
   $ #counter @= Auto
-      { autoInitial = 0 :: Int
-      , autoWatch = LMB
-      , autoView = Show
-      , autoUpdate = \e -> _1 %~ case e of
-        True -> (+1)
+      { autoWatch = LMB
+      , autoView = Self (Show 0)
+      , autoUpdate = \e -> self %~ case e of
+        True -> \(Show x) -> Show (x + 1)
         _ -> id
       }
   <: #hello @= (Auto
-      { autoInitial = ()
-      , autoWatch = Hover
-      , autoView = const $ Transit 5
+      { autoWatch = Hover
+      , autoView = Transit 5
         (Fill $ V4 0.0 0.0 0.0 1)
         (Fill $ V4 0.0 0.44 0.41 1)
-      , autoUpdate = \e -> _2 %~ case e of
+      , autoUpdate = \case
         True -> transitIn
         False -> transitOut
       }
