@@ -16,8 +16,13 @@ module Glassy (Glassy(..)
   , Fill(..)
   , rgb
   , Frame(..)
+  , Transit(..)
+  , TransitionState(..)
+  , transitIn
+  , transitOut
   -- * Automata
   , Auto(..)
+  , Override(..)
   -- * Layout
   , Margin(..)
   , VRec(..)
@@ -26,6 +31,7 @@ module Glassy (Glassy(..)
   , WrapState(..)
   , WrapEvent(..)
   -- * Input
+  , Hover(..)
   , LMB(..)
   , TextBox(..))
   where
@@ -51,6 +57,8 @@ import Graphics.Holz
 import Linear
 import qualified Graphics.Holz.Text as Text
 import qualified System.Info as Info
+import Glassy.Color
+import Glassy.Transitive
 
 type HolzEffs =
   [ "holzShader" >: ReaderEff Shader
@@ -155,12 +163,12 @@ newtype Show a = Show { getShow :: a }
 instance Prelude.Show a => Glassy (Glassy.Show a) where
   poll (Show a) = poll $ Str $ show a
 
-newtype Fill = Fill { fillColor :: V4 Float }
+newtype Fill = Fill { fillColor :: V4 Float } deriving Transitive
 
 instance Glassy Fill where
   poll (Fill bg) = do
     Box p q <- askEff #box
-    return $ liftHolz $ draw identity $ rectangle bg p q
+    return $ liftHolz $ draw identity $ rectangle (bg & _xyz %~ fromHSV) p q
 
 rgb :: Float -> Float -> Float -> V4 Float
 rgb r g b = V4 r g b 1
@@ -320,6 +328,20 @@ instance Glassy LMB where
     when (b /= f && Box.isInside pos box) $ tellEff #event f
     return (return ())
 
+data Hover = Hover
+
+instance Glassy Hover where
+  type State Hover = Bool
+  type Event Hover = Bool
+  initialState _ = False
+  poll Hover = do
+    b <- get
+    box <- askEff #box
+    f <- (`Box.isInside` box) <$> liftHolz getCursorPos
+    put f
+    when (b /= f) $ tellEff #event f
+    return $ return ()
+
 -- A textbox (always active)
 newtype TextBox = TextBox String
 
@@ -362,3 +384,56 @@ instance Glassy TextBox where
 
       Text.render mat
       Text.clear
+
+-- | transit with a shared state
+data Transit a = Transit !Int !a !a
+
+data TransitionState = TLeft | TIn !Float | TOut !Float | TRight
+
+transitIn :: TransitionState -> TransitionState
+transitIn (TOut i) = TIn i
+transitIn _ = TIn 0
+
+transitOut :: TransitionState -> TransitionState
+transitOut (TIn i) = TOut i
+transitOut _ = TOut 1
+
+instance (Glassy a, Transitive a) => Glassy (Transit a) where
+  type State (Transit a) = (TransitionState, State a)
+  type Event (Transit a) = Event a
+  initialState (Transit _ a _) = (TLeft, initialState a)
+  poll (Transit dur a b) = get >>= \case
+    (TLeft, s) -> do
+      (m, s') <- castEff $ runStateEff (poll a) s
+      put (TLeft, s')
+      return m
+    (TIn k, s) -> do
+      (m, s') <- castEff $ runStateEff (poll $ transit k a b) s
+      if k < 1
+        then put (TIn (k + 1 / fromIntegral dur), s')
+        else put (TRight, s')
+      return m
+    (TOut k, s) -> do
+      (m, s') <- castEff $ runStateEff (poll $ transit k a b) s
+      if k > 0
+        then put (TOut (k - 1 / fromIntegral dur), s')
+        else put (TLeft, s')
+      return m
+    (TRight, s) -> do
+      (m, s') <- castEff $ runStateEff (poll b) s
+      put (TRight, s')
+      return m
+
+data Override a = Override
+  { overrideTarget :: a
+  , overrideState :: Event a -> State a -> State a }
+
+instance Glassy a => Glassy (Override a) where
+  type Event (Override a) = Event a
+  type State (Override a) = State a
+  initialState (Override a _) = initialState a
+  poll (Override a u) = do
+    s <- get
+    ((m, s'), es) <- castEff $ enumWriterEff $ poll a `runStateDef` s
+    put $! foldr u s' es
+    return m

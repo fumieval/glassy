@@ -15,7 +15,7 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
-  exposed-modules:     Glassy
+  exposed-modules:     Glassy, Glassy.Transitive, Glassy.Color
   ghc-options:         -threaded -Wall
   build-depends:       base
     , holz
@@ -36,6 +36,7 @@ executable glassy-demo
   build-depends:       base
                      , glassy
                      , extensible
+                     , linear
   default-language:    Haskell2010
 
 executable glassy-hello
