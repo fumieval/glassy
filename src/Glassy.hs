@@ -228,6 +228,10 @@ instance Wrapper Sized where
 
 newtype WrapState a = WrapState { unwrapState :: State a }
 
+instance Wrapper WrapState where
+  type Repr WrapState a = State a
+  _Wrapper = dimap unwrapState (fmap WrapState)
+
 withSubbox :: (Monad m, Forall (KeyValue KnownSymbol Glassy) xs)
   => Bool -- horizontal?
   -> Box V2 Float
@@ -254,6 +258,10 @@ withSubbox horiz (Box (V2 x0 y0) (V2 x1 y1)) rec k = flip evalStateT
       Unsized _ -> (mempty, Sum 1)) rec
 
 newtype WrapEvent a = WrapEvent { unwrapEvent :: Event a }
+
+instance Wrapper WrapEvent where
+  type Repr WrapEvent a = Event a
+  _Wrapper = dimap unwrapEvent (fmap WrapEvent)
 
 initRec :: Forall (KeyValue KnownSymbol Glassy) xs
   => RecordOf Sized xs -> RecordOf WrapState xs
