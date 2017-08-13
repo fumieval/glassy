@@ -20,6 +20,8 @@ module Glassy (Glassy(..)
   , TransitionState(..)
   , transitIn
   , transitOut
+  , Self(..)
+  , self
   -- * Automata
   , Auto(..)
   -- * Layout
@@ -202,6 +204,22 @@ instance Glassy a => Glassy (Eff HolzEffs a) where
     (n, s') <- castEff $ runStateDef (poll a) s
     put $ Just s'
     return n
+
+newtype Self a = Self a
+
+instance Glassy a => Glassy (Self a) where
+  type State (Self a) = (a, State a)
+  type Event (Self a) = Event a
+  initialState (Self a) = (a, initialState a)
+  poll (Self _) = do
+    (a, s) <- get
+    (m, s') <- castEff $ poll a `runStateDef` s
+    put (a, s')
+    return m
+
+-- | Accessor for the 'Self' state
+self :: Lens' (a, b) a
+self = _1
 
 data Auto s w a = Auto
   { autoInitial :: s -- ^ the initial state
