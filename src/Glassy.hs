@@ -177,7 +177,7 @@ instance Glassy a => Glassy (Frame a) where
 data Rows a = Rows
 
 insertRows :: Glassy a => a -> [(a, State a)] -> [(a, State a)]
-insertRows a = ((a, initialState a):)
+insertRows a = (++[(a, initialState a)])
 
 instance Glassy a => Glassy (Rows a) where
   type State (Rows a) = [(a, State a)]

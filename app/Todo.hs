@@ -28,7 +28,7 @@ main :: IO ()
 main = start $ (,) (fillRGBA 0.14 0.19 0.22 1) $ Auto
   { autoWatch = (Always, Down KeyEnter)
   , autoView = VRec
-    $ #box @:> Sized 0.1 (fillRGBA 0.5 0.5 0.55 1, TextBox)
+    $ #box @:> Sized 0.1 (fillRGBA 0.3 0.3 0.35 1, TextBox)
     <: #list @:> Unsized (Rows :: Rows (Auto Hover (Transit Fill), Auto (Chatter LMB) (Transit Str)))
     <: nil
   , autoUpdate = \e s -> case e of
