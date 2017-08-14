@@ -42,7 +42,9 @@ module Glassy (Glassy(..)
   , LMB(..)
   , TextBox(..)
   , textBoxText
-  , clearTextBox)
+  , clearTextBox
+  -- * reexport
+  , module Glassy.Color)
   where
 
 import Control.Concurrent (threadDelay)
@@ -131,12 +133,11 @@ liftHolz m = do
   win <- askEff #holzWindow
   liftIO $ runShaderT sh m `runReaderT` win
 
-newtype Str = Str String
+data Str = Str RGBA String
 
-drawStringIn :: Box V2 Float -> Text.Renderer -> String -> ShaderT (ReaderT Window IO) ()
-drawStringIn (Box (V2 x0 y0) (V2 x1 y1)) font str = Text.runRenderer font $ do
+drawStringIn :: Box V2 Float -> Text.Renderer -> RGBA -> String -> ShaderT (ReaderT Window IO) ()
+drawStringIn (Box (V2 x0 y0) (V2 x1 y1)) font fg str = Text.runRenderer font $ do
   let size = (y1 - y0) * 2 / 3
-  let fg = pure 1
   Text.string size fg str
   V2 x y <- Text.getOffset
   let k = min 1 $ (x1 - x0) / x
@@ -146,13 +147,13 @@ drawStringIn (Box (V2 x0 y0) (V2 x1 y1)) font str = Text.runRenderer font $ do
 
 instance Glassy Str where
   type State Str = String
-  initialState (Str s) = s
-  poll (Str _) = do
+  initialState (Str _ s) = s
+  poll (Str fg _) = do
     box <- askEff #box
     s <- get
     return $ do
       font <- askEff #font
-      liftHolz $ drawStringIn box font s
+      liftHolz $ drawStringIn box font fg s
 
 -- | Hide overflow
 newtype Frame a = Frame { getFrame :: a }
@@ -204,7 +205,7 @@ instance Prelude.Show a => Glassy (Glassy.Show a) where
     a <- get
     return $ do
       font <- askEff #font
-      liftHolz $ drawStringIn box font $ show a
+      liftHolz $ drawStringIn box font (pure 1) $ show a
 
 newtype Fill = Fill { fillColor :: V4 Float } deriving Transitive
 
@@ -454,11 +455,11 @@ instance Glassy TextBox where
     get >>= \case
       Left str -> do
         when (btn && cursorIsIn) $ put $ Right (str, length str)
-        castEff $ poll (Str str) `evalStateDef` str
+        castEff $ poll (Str (pure 1) str) `evalStateDef` str
       Right s@(str, _)
         | btn && not cursorIsIn -> do
           put (Left str)
-          castEff $ poll (Str str) `evalStateDef` str
+          castEff $ poll (Str (pure 1) str) `evalStateDef` str
         | otherwise -> do
           (m, s') <- castEff $ activeTextBox `runStateDef` s
           put (Right s')

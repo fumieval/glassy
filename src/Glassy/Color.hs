@@ -1,6 +1,11 @@
 module Glassy.Color where
 import Linear
 
+type RGBA = V4 Float
+
+white :: RGBA
+white = pure 1
+
 fromHSV :: V3 Float -> V3 Float
 fromHSV (V3 h_ s v) = pure (v - c) + rgb h_ where
   c = s * v

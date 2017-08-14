@@ -25,6 +25,6 @@ main = start $ VRec
     , autoUpdate = const $ _2 +~ 1
     }
   <: #hello @= (hover 0.5 0.3 0.2
-    , HRec $ #h @= Str "Hello,"
-      <: #w @= Str "World" <: nil)
+    , HRec $ #h @= Str white "Hello,"
+      <: #w @= Str white "World" <: nil)
   <: nil

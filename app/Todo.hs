@@ -27,6 +27,6 @@ main = start $ (,) (fillRGBA 0.14 0.19 0.22 1) $ Auto
   , autoUpdate = \_ s -> case s ^. #box . _2 . to textBoxText of
     "" -> s
     str -> s
-      & #list %~ insertRows (hover 0.22 0.28 0.35, Str str)
+      & #list %~ insertRows (hover 0.22 0.28 0.35, Str white str)
       & #box . _2 %~ clearTextBox
   }
