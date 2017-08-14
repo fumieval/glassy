@@ -7,7 +7,7 @@ transits :: Transitive a => a -> a -> Float -> a
 transits a b t = transit t a b
 
 class Transitive a where
-  -- | Smoothly transit between two values.
+  -- | Smoothly transit (often linearly interpolate) between two values.
   --
   -- @
   -- transit 0 a b = a

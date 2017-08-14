@@ -8,38 +8,39 @@ import Linear
 
 hover :: Float -> Float -> Float -> Auto Hover (Transit Fill)
 hover r g b = Auto
-  { autoWatch = Hover
-  , autoView = Transit 5 $ transits
-    (fillRGBA r g b 0)
-    (fillRGBA r g b 1)
-  , autoUpdate = \case
+  { autoWatch = Hover -- when the cursor gets in or out of the area
+  , autoUpdate = \case -- switch an animation
     True -> transitIn
     False -> transitOut
+  , autoView = Transit 5 $ fillRGBA r g b
   }
 
 fadeout :: String -> Auto (Chatter LMB) (Transit Str)
 fadeout str = Auto
-  { autoWatch = Down LMB
+  { autoWatch = Down LMB -- when it's clicked
+  , autoUpdate = const transitIn -- start an animation
   , autoView = Transit 8 $ \t -> Str (V4 1 1 1 (1 - t)) str
-  , autoUpdate = const transitIn
   }
 
 main :: IO ()
 main = start $ (,) (fillRGBA 0.14 0.19 0.22 1) $ Auto
   { autoWatch = (Always, Down KeyEnter)
-  , autoView = VRec
-    $ #box @:> Sized 0.1 (fillRGBA 0.3 0.3 0.35 1, TextBox)
-    <: #list @:> Unsized (Rows :: Rows (Auto Hover (Transit Fill), Auto (Chatter LMB) (Transit Str)))
-    <: nil
   , autoUpdate = \e s -> case e of
+    -- Always filter the list
     Left _ -> s & #list %~ filter (\x -> x
       ^. rowItemState
-      . _2
+      . _2 -- the second element is `fadeout`
       . autoState
       . transitState /= TEnd)
+    -- When Enter is pressed
     Right _ -> case s ^. #box . _2 . to textBoxText of
       "" -> s
       str -> s
         & #list %~ insertRows (hover 0.22 0.28 0.35, fadeout str)
         & #box . _2 %~ clearTextBox
+  , autoView = VRec
+    $ #box @:> Sized 0.1 (fillRGBA 0.3 0.3 0.35 1, TextBox)
+    <: #list @:> Unsized (Rows :: Rows
+      (Auto Hover (Transit Fill), Auto (Chatter LMB) (Transit Str)))
+    <: nil
   }
