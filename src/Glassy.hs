@@ -25,6 +25,7 @@ module Glassy (Glassy(..)
   , self
   -- * Automata
   , Auto(..)
+  , autoState
   -- * Collection
   , Rows(..)
   , insertRows
@@ -274,6 +275,9 @@ instance (Glassy w, Glassy a) => Glassy (Auto w a) where
     mapM_ (tellEff #event) os
     return (n >> m)
 
+autoState :: Lens' (a, b) b
+autoState = _2
+
 newtype VRec (xs :: [Assoc Symbol *]) = VRec { getVRec :: RecordOf Sized xs }
 
 data Sized a = Sized !Float !a | Unsized !a
@@ -515,7 +519,7 @@ activeTextBox = do
 -- | transit with a shared state
 data Transit a = Transit !Int (Float -> a)
 
-data TransitionState = TLeft | TIn !Float | TOut !Float | TRight
+data TransitionState = TLeft | TIn !Float | TOut !Float | TRight deriving (Eq, Ord)
 
 transitIn :: (TransitionState, a) -> (TransitionState, a)
 transitIn (TOut i, a) = (TIn i, a)
