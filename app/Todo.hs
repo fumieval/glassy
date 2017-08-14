@@ -32,7 +32,11 @@ main = start $ (,) (fillRGBA 0.14 0.19 0.22 1) $ Auto
     <: #list @:> Unsized (Rows :: Rows (Auto Hover (Transit Fill), Auto (Chatter LMB) (Transit Str)))
     <: nil
   , autoUpdate = \e s -> case e of
-    Left _ -> s & #list %~ filter (\x -> x ^. _2 . autoState . _2 . _1 /= TRight)
+    Left _ -> s & #list %~ filter (\x -> x
+      ^. rowItemState
+      . _2
+      . autoState
+      . transitState /= TRight)
     Right _ -> case s ^. #box . _2 . to textBoxText of
       "" -> s
       str -> s

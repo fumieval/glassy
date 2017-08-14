@@ -16,19 +16,24 @@ module Glassy (Glassy(..)
   , Fill(..)
   , fillRGBA
   , Frame(..)
+  , Self(..)
+  , self
+  -- * Transition
   , Transit(..)
   , TransitionState(..)
   , transits
   , transitIn
   , transitOut
-  , Self(..)
-  , self
+  , transitState
   -- * Automata
   , Auto(..)
+  , AutoState(..)
   , autoState
   -- * Collection
   , Rows(..)
   , insertRows
+  , RowItemState(..)
+  , rowItemState
   -- * Layout
   , Margin(..)
   , VRec(..)
@@ -176,11 +181,16 @@ instance Glassy a => Glassy (Frame a) where
 
 data Rows a = Rows
 
-insertRows :: Glassy a => a -> [(a, State a)] -> [(a, State a)]
-insertRows a = (++[(a, initialState a)])
+insertRows :: Glassy a => a -> [RowItemState a] -> [RowItemState a]
+insertRows a = flip snoc $ RowItemState a (initialState a)
+
+data RowItemState a = RowItemState !a !(State a)
+
+rowItemState :: Lens' (RowItemState a) (State a)
+rowItemState f (RowItemState a s) = RowItemState a <$> f s
 
 instance Glassy a => Glassy (Rows a) where
-  type State (Rows a) = [(a, State a)]
+  type State (Rows a) = [RowItemState a]
   type Event (Rows a) = Event a
   initialState _ = []
   poll Rows = do
@@ -189,10 +199,10 @@ instance Glassy a => Glassy (Rows a) where
     let h = (y1 - y0) / fromIntegral (length ss)
     let ys = [y0, y0+h..]
     (ms, ss') <- fmap unzip $ forM (zip3 ys (tail ys) ss)
-      $ \(y, y', (a, s)) -> castEff
+      $ \(y, y', RowItemState a s) -> castEff
         $ localEff #box (const $ Box (V2 x0 y) (V2 x1 y'))
         $ poll a `runStateDef` s
-    put $ zip (map fst ss) ss'
+    put $ zipWith (\(RowItemState a _) s -> RowItemState a s) ss ss'
     return $ sequence_ ms
 
 newtype Show a = Show { getShow :: a }
@@ -246,12 +256,6 @@ instance Glassy a => Glassy (Self a) where
 self :: Lens' (a, b) a
 self = _1
 
-data Auto w a = Auto
-  { autoWatch :: w -- ^ the target to watch
-  , autoView :: a -- ^ display
-  , autoUpdate :: Event w -> State a -> State a -- update its own state.
-  }
-
 pipeWriterEff :: forall k w xs a. (w -> Eff xs ())
   -> Eff (k >: WriterEff w ': xs) a
   -> Eff xs a
@@ -262,21 +266,29 @@ enumWriterEff :: forall k w xs a. Eff (k >: WriterEff w ': xs) a
 enumWriterEff = peelEff1 (\a k -> return (a, k [])) (\(w, a) k f -> k a $ (w:) . f)
   `flip` id
 
+data Auto w a = Auto
+  { autoWatch :: w -- ^ the target to watch
+  , autoView :: a -- ^ display
+  , autoUpdate :: Event w -> State a -> State a -- update its own state.
+  }
+
+data AutoState w a = AutoState !(State w) (State a)
+
 instance (Glassy w, Glassy a) => Glassy (Auto w a) where
-  type State (Auto w a) = (State w, State a)
+  type State (Auto w a) = AutoState w a
   type Event (Auto w a) = Event a
-  initialState (Auto w a _) = (initialState w, initialState a)
+  initialState (Auto w a _) = AutoState (initialState w) (initialState a)
   poll (Auto w v u) = do
-    (ws, vs) <- get
+    AutoState ws vs <- get
     ((n, ws'), es) <- castEff $ enumWriterEff $ poll w `runStateDef` ws
     let !vs' = foldr u vs es
     ((m, vs''), os) <- castEff $ enumWriterEff $ poll v `runStateDef` vs'
-    put (ws', vs'')
+    put $ AutoState ws' vs''
     mapM_ (tellEff #event) os
     return (n >> m)
 
-autoState :: Lens' (a, b) b
-autoState = _2
+autoState :: Lens' (AutoState w a) (State a)
+autoState f (AutoState w a) = AutoState w <$> f a
 
 newtype VRec (xs :: [Assoc Symbol *]) = VRec { getVRec :: RecordOf Sized xs }
 
@@ -528,6 +540,9 @@ transitIn (_, a) = (TIn 0, a)
 transitOut :: (TransitionState, a) -> (TransitionState, a)
 transitOut (TIn i, a) = (TOut i, a)
 transitOut (_, a) = (TOut 1, a)
+
+transitState :: Lens' (TransitionState, a) TransitionState
+transitState = _1
 
 instance (Glassy a) => Glassy (Transit a) where
   type State (Transit a) = (TransitionState, State a)
