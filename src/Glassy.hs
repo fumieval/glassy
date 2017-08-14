@@ -469,7 +469,7 @@ textBoxText (Left s) = s
 textBoxText (Right (s, _)) = s
 
 clearTextBox :: State TextBox -> State TextBox
-clearTextBox (Left "") = Left ""
+clearTextBox (Left _) = Left ""
 clearTextBox (Right _) = Right ("", 0)
 
 activeTextBox :: Eff (GlassyEffs (String, Int) Void) (Eff HolzEffs ())
