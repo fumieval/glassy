@@ -506,7 +506,7 @@ activeTextBox = do
     Text.string size fg sr
     V2 x y <- Text.getOffset
     let c = min 1 $ (x1 - x0) / x
-    let mat = translate (V3 (x1 - 4 - c * x) (y0 + (y1 - y0) * 0.75 - c * y) 1)
+    let mat = translate (V3 (x0 + 4) (y0 + (y1 - y0) * 0.75 - c * y) 1)
           !*! scaled (V4 c c c 1)
 
     -- Draw a bar
