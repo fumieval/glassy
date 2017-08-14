@@ -18,6 +18,7 @@ module Glassy (Glassy(..)
   , Frame(..)
   , Transit(..)
   , TransitionState(..)
+  , transits
   , transitIn
   , transitOut
   , Self(..)
@@ -512,7 +513,7 @@ activeTextBox = do
     Text.clear
 
 -- | transit with a shared state
-data Transit a = Transit !Int !a !a
+data Transit a = Transit !Int (Float -> a)
 
 data TransitionState = TLeft | TIn !Float | TOut !Float | TRight
 
@@ -524,28 +525,28 @@ transitOut :: (TransitionState, a) -> (TransitionState, a)
 transitOut (TIn i, a) = (TOut i, a)
 transitOut (_, a) = (TOut 1, a)
 
-instance (Glassy a, Transitive a) => Glassy (Transit a) where
+instance (Glassy a) => Glassy (Transit a) where
   type State (Transit a) = (TransitionState, State a)
   type Event (Transit a) = Event a
-  initialState (Transit _ a _) = (TLeft, initialState a)
-  poll (Transit dur a b) = get >>= \case
+  initialState (Transit _ f) = (TLeft, initialState $ f 0)
+  poll (Transit dur f) = get >>= \case
     (TLeft, s) -> do
-      (m, s') <- castEff $ runStateEff (poll a) s
+      (m, s') <- castEff $ runStateEff (poll $ f 0) s
       put (TLeft, s')
       return m
     (TIn k, s) -> do
-      (m, s') <- castEff $ runStateEff (poll $ transit k a b) s
+      (m, s') <- castEff $ runStateEff (poll $ f k) s
       if k < 1
         then put (TIn (k + 1 / fromIntegral dur), s')
         else put (TRight, s')
       return m
     (TOut k, s) -> do
-      (m, s') <- castEff $ runStateEff (poll $ transit k a b) s
+      (m, s') <- castEff $ runStateEff (poll $ f k) s
       if k > 0
         then put (TOut (k - 1 / fromIntegral dur), s')
         else put (TLeft, s')
       return m
     (TRight, s) -> do
-      (m, s') <- castEff $ runStateEff (poll b) s
+      (m, s') <- castEff $ runStateEff (poll $ f 1) s
       put (TRight, s')
       return m

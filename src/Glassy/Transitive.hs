@@ -3,6 +3,9 @@ import Control.Applicative
 import Linear
 import Data.BoundingBox as Box
 
+transits :: Transitive a => a -> a -> Float -> a
+transits a b t = transit t a b
+
 class Transitive a where
   -- | Smoothly transit between two values.
   --

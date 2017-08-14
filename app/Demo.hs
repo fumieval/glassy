@@ -9,7 +9,7 @@ import Control.Lens
 hover :: Float -> Float -> Float -> Auto Hover (Transit Fill)
 hover r g b = Auto
   { autoWatch = Hover
-  , autoView = Transit 5
+  , autoView = Transit 5 $ transits
     (fillRGBA r g b 0)
     (fillRGBA r g b 1)
   , autoUpdate = \case
