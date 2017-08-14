@@ -35,6 +35,7 @@ module Glassy (Glassy(..)
   , WrapState(..)
   , WrapEvent(..)
   -- * Input
+  , Always(..)
   , Chatter(..)
   , Key(..)
   , Hover(..)
@@ -434,6 +435,12 @@ instance (Event a ~ Bool, Glassy a) => Glassy (Chatter a) where
     when (cond es) $ tellEff #event ()
     put s'
     return m
+
+data Always = Always
+
+instance Glassy Always where
+  type Event Always = ()
+  poll _ = return () <$ tellEff #event ()
 
 data TextBox = TextBox
 
