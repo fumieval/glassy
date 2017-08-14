@@ -495,7 +495,7 @@ activeTextBox = do
   let (l, r) = splitAt (p - i) str
   let str' = l ++ xs ++ drop (i + j) r
   let p' = length xs + k - i - j
-  put (str', p')
+  put (str', max 0 $ min (length str') $ p')
   font <- askEff #font
   return $ liftHolz $ font `Text.runRenderer` do
     let fg = pure 1
