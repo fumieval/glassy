@@ -531,7 +531,7 @@ activeTextBox = do
 -- | transit with a shared state
 data Transit a = Transit !Int (Float -> a)
 
-data TransitionState = TLeft | TIn !Float | TOut !Float | TRight deriving (Eq, Ord)
+data TransitionState = TBeginning | TIn !Float | TOut !Float | TEnd deriving (Eq, Ord)
 
 transitIn :: (TransitionState, a) -> (TransitionState, a)
 transitIn (TOut i, a) = (TIn i, a)
@@ -547,25 +547,25 @@ transitState = _1
 instance (Glassy a) => Glassy (Transit a) where
   type State (Transit a) = (TransitionState, State a)
   type Event (Transit a) = Event a
-  initialState (Transit _ f) = (TLeft, initialState $ f 0)
+  initialState (Transit _ f) = (TBeginning, initialState $ f 0)
   poll (Transit dur f) = get >>= \case
-    (TLeft, s) -> do
+    (TBeginning, s) -> do
       (m, s') <- castEff $ runStateEff (poll $ f 0) s
-      put (TLeft, s')
+      put (TBeginning, s')
       return m
     (TIn k, s) -> do
       (m, s') <- castEff $ runStateEff (poll $ f k) s
       if k < 1
         then put (TIn (k + 1 / fromIntegral dur), s')
-        else put (TRight, s')
+        else put (TEnd, s')
       return m
     (TOut k, s) -> do
       (m, s') <- castEff $ runStateEff (poll $ f k) s
       if k > 0
         then put (TOut (k - 1 / fromIntegral dur), s')
-        else put (TLeft, s')
+        else put (TBeginning, s')
       return m
-    (TRight, s) -> do
+    (TEnd, s) -> do
       (m, s') <- castEff $ runStateEff (poll $ f 1) s
-      put (TRight, s')
+      put (TEnd, s')
       return m

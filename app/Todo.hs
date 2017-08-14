@@ -36,7 +36,7 @@ main = start $ (,) (fillRGBA 0.14 0.19 0.22 1) $ Auto
       ^. rowItemState
       . _2
       . autoState
-      . transitState /= TRight)
+      . transitState /= TEnd)
     Right _ -> case s ^. #box . _2 . to textBoxText of
       "" -> s
       str -> s
