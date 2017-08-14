@@ -108,9 +108,9 @@ start a = withHolz $ do
   sh <- makeShader
   font <- case Info.os of
     "linux" -> Text.typewriter "/usr/share/fonts/truetype/takao-gothic/TakaoPGothic.ttf"
-    os -> do
-      print os
-      Text.typewriter "/System/Library/Fonts/ヒラギノ角ゴシック W9.ttc"
+    "darwin" -> Text.typewriter "/System/Library/Fonts/LucidaGrande.ttc"
+    "windows" -> Text.typewriter "C:\\Windows\\Fonts\\segoeui.ttf"
+    _ -> fail "Unsupported"
   void $ retractEff @ "IO"
     $ runMaybeEff @ "close"
     $ runReaderEff @ "font" ?? font
