@@ -31,9 +31,10 @@ module Glassy (Glassy(..)
   , autoState
   -- * Collection
   , Rows(..)
-  , insertRows
-  , RowItemState(..)
-  , rowItemState
+  , Columns(..)
+  , insertElem
+  , ElemState(..)
+  , ElemState
   -- * Layout
   , Margin(..)
   , VRec(..)
@@ -179,18 +180,20 @@ instance Glassy a => Glassy (Frame a) where
       m
       liftHolz setOrthographic
 
+insertElem :: Glassy a => a -> [ElemState a] -> [ElemState a]
+insertElem a = flip snoc $ ElemState a (initialState a)
+
+data ElemState a = ElemState !a !(State a)
+
+elemState :: Lens' (ElemState a) (State a)
+elemState f (ElemState a s) = ElemState a <$> f s
+
 data Rows a = Rows
 
-insertRows :: Glassy a => a -> [RowItemState a] -> [RowItemState a]
-insertRows a = flip snoc $ RowItemState a (initialState a)
-
-data RowItemState a = RowItemState !a !(State a)
-
-rowItemState :: Lens' (RowItemState a) (State a)
-rowItemState f (RowItemState a s) = RowItemState a <$> f s
+data Columns a = Columns
 
 instance Glassy a => Glassy (Rows a) where
-  type State (Rows a) = [RowItemState a]
+  type State (Rows a) = [ElemState a]
   type Event (Rows a) = Event a
   initialState _ = []
   poll Rows = do
@@ -199,10 +202,26 @@ instance Glassy a => Glassy (Rows a) where
     let h = (y1 - y0) / fromIntegral (length ss)
     let ys = [y0, y0+h..]
     (ms, ss') <- fmap unzip $ forM (zip3 ys (tail ys) ss)
-      $ \(y, y', RowItemState a s) -> castEff
+      $ \(y, y', ElemState a s) -> castEff
         $ localEff #box (const $ Box (V2 x0 y) (V2 x1 y'))
         $ poll a `runStateDef` s
-    put $ zipWith (\(RowItemState a _) s -> RowItemState a s) ss ss'
+    put $ zipWith (\(ElemState a _) s -> ElemState a s) ss ss'
+    return $ sequence_ ms
+
+instance Glassy a => Glassy (Columns a) where
+  type State (Columns a) = [ElemState a]
+  type Event (Columns a) = Event a
+  initialState _ = []
+  poll Columns = do
+    Box (V2 x0 y0) (V2 x1 y1) <- askEff #box
+    ss <- get
+    let h = (x1 - x0) / fromIntegral (length ss)
+    let xs = [x0, x0+h..]
+    (ms, ss') <- fmap unzip $ forM (zip3 xs (tail xs) ss)
+      $ \(x, x', ElemState a s) -> castEff
+        $ localEff #box (const $ Box (V2 x y0) (V2 x' y1))
+        $ poll a `runStateDef` s
+    put $ zipWith (\(ElemState a _) s -> ElemState a s) ss ss'
     return $ sequence_ ms
 
 newtype Show a = Show { getShow :: a }
