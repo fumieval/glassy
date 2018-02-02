@@ -15,7 +15,7 @@
 # resolver:
 #  name: custom-snapshot
 #  location: "./custom-snapshot.yaml"
-resolver: lts-9.0
+resolver: lts-10.4
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
@@ -38,16 +38,14 @@ resolver: lts-9.0
 packages:
 - '.'
 - location:
-   git: https://github.com/fumieval/extensible.git
-   commit: afb077ffe0400ef9d60c77c3adbf3b35f8b8edc4
-- location:
-   git: https://github.com/fumieval/holz.git
-   commit: af28c610bca247dea3e7fefd0da90a687cc977d8
+    git: https://github.com/fumieval/holz
+    commit: af28c610bca247dea3e7fefd0da90a687cc977d8
+  extra-dep: true
+
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
 extra-deps:
 - freetype2-0.1.2
-- holz-0
 
 # Override default flag values for local packages and extra-deps
 flags: {}
