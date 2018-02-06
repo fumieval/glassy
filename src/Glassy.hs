@@ -4,7 +4,6 @@
 {-# LANGUAGE DataKinds, KindSignatures, TypeOperators #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE LambdaCase #-}
 module Glassy (Glassy(..)
@@ -34,7 +33,7 @@ module Glassy (Glassy(..)
   , Columns(..)
   , insertElem
   , ElemState(..)
-  , ElemState
+  , elemState
   -- * Layout
   , Margin(..)
   , VRec(..)
@@ -79,6 +78,24 @@ import qualified System.Info as Info
 import Glassy.Color
 import Glassy.Transitive
 
+_box :: Proxy "box"
+_box = Proxy
+
+_holzShader :: Proxy "holzShader"
+_holzShader = Proxy
+
+_holzWindow :: Proxy "holzWindow"
+_holzWindow = Proxy
+
+_font :: Proxy "font"
+_font = Proxy
+
+_event :: Proxy "event"
+_event = Proxy
+
+_close :: Proxy "close"
+_close = Proxy
+
 type HolzEffs =
   [ "holzShader" >: ReaderEff Shader
   , "holzWindow" >: ReaderEff Window
@@ -97,7 +114,7 @@ class Glassy a where
   type Event a = Void
   initialState :: a -> State a
 
-  default initialState :: a -> ()
+  default initialState :: (State a ~ ()) => a -> State a
   initialState _ = ()
 
   poll :: a -> Eff (GlassyEffs (State a) (Event a)) (Eff HolzEffs ())
@@ -130,15 +147,15 @@ start a = withHolz $ do
       liftIO $ threadDelay $ floor $ (*1e6)
         $ 1 / 30 - (realToFrac (diffUTCTime t1 t0) :: Double)
       shouldClose <- runReaderT windowShouldClose win
-      when shouldClose $ throwEff #close ()
+      when shouldClose $ throwEff _close ()
 
 liftHolz :: (Associate "holzShader" (ReaderEff Shader) xs
   , Associate "holzWindow" (ReaderEff Window) xs
   , Associate "IO" IO xs)
   => ShaderT (ReaderT Window IO) a -> Eff xs a
 liftHolz m = do
-  sh <- askEff #holzShader
-  win <- askEff #holzWindow
+  sh <- askEff _holzShader
+  win <- askEff _holzWindow
   liftIO $ runShaderT sh m `runReaderT` win
 
 data Str = Str RGBA String
@@ -157,10 +174,10 @@ instance Glassy Str where
   type State Str = String
   initialState (Str _ s) = s
   poll (Str fg _) = do
-    box <- askEff #box
+    box <- askEff _box
     s <- get
     return $ do
-      font <- askEff #font
+      font <- askEff _font
       liftHolz $ drawStringIn box font fg s
 
 -- | Hide overflow
@@ -171,7 +188,7 @@ instance Glassy a => Glassy (Frame a) where
   type Event (Frame a) = Event a
   initialState (Frame a) = initialState a
   poll (Frame a) = do
-    box@(Box (V2 x0 y0) (V2 x1 y1)) <- askEff #box
+    box@(Box (V2 x0 y0) (V2 x1 y1)) <- askEff _box
     m <- poll a
     return $ do
       liftHolz $ do
@@ -197,13 +214,13 @@ instance Glassy a => Glassy (Rows a) where
   type Event (Rows a) = Event a
   initialState _ = []
   poll Rows = do
-    Box (V2 x0 y0) (V2 x1 y1) <- askEff #box
+    Box (V2 x0 y0) (V2 x1 y1) <- askEff _box
     ss <- get
     let h = (y1 - y0) / fromIntegral (length ss)
     let ys = [y0, y0+h..]
     (ms, ss') <- fmap unzip $ forM (zip3 ys (tail ys) ss)
       $ \(y, y', ElemState a s) -> castEff
-        $ localEff #box (const $ Box (V2 x0 y) (V2 x1 y'))
+        $ localEff _box (const $ Box (V2 x0 y) (V2 x1 y'))
         $ poll a `runStateDef` s
     put $ zipWith (\(ElemState a _) s -> ElemState a s) ss ss'
     return $ sequence_ ms
@@ -213,13 +230,13 @@ instance Glassy a => Glassy (Columns a) where
   type Event (Columns a) = Event a
   initialState _ = []
   poll Columns = do
-    Box (V2 x0 y0) (V2 x1 y1) <- askEff #box
+    Box (V2 x0 y0) (V2 x1 y1) <- askEff _box
     ss <- get
     let h = (x1 - x0) / fromIntegral (length ss)
     let xs = [x0, x0+h..]
     (ms, ss') <- fmap unzip $ forM (zip3 xs (tail xs) ss)
       $ \(x, x', ElemState a s) -> castEff
-        $ localEff #box (const $ Box (V2 x y0) (V2 x' y1))
+        $ localEff _box (const $ Box (V2 x y0) (V2 x' y1))
         $ poll a `runStateDef` s
     put $ zipWith (\(ElemState a _) s -> ElemState a s) ss ss'
     return $ sequence_ ms
@@ -232,17 +249,17 @@ instance Prelude.Show a => Glassy (Glassy.Show a) where
   type State (Glassy.Show a) = a
   initialState (Show a) = a
   poll _ = do
-    box <- askEff #box
+    box <- askEff _box
     a <- get
     return $ do
-      font <- askEff #font
+      font <- askEff _font
       liftHolz $ drawStringIn box font (pure 1) $ show a
 
 newtype Fill = Fill { fillColor :: V4 Float } deriving Transitive
 
 instance Glassy Fill where
   poll (Fill bg) = do
-    Box p q <- askEff #box
+    Box p q <- askEff _box
     return $ liftHolz $ draw identity $ rectangle (bg & _xyz %~ fromHSV) p q
 
 fillRGBA :: Float -> Float -> Float -> Float -> Fill
@@ -303,7 +320,7 @@ instance (Glassy w, Glassy a) => Glassy (Auto w a) where
     let !vs' = foldr u vs es
     ((m, vs''), os) <- castEff $ enumWriterEff $ poll v `runStateDef` vs'
     put $ AutoState ws' vs''
-    mapM_ (tellEff #event) os
+    mapM_ (tellEff _event) os
     return (n >> m)
 
 autoState :: Lens' (AutoState w a) (State a)
@@ -367,15 +384,15 @@ pollRec :: Forall (KeyValue KnownSymbol Glassy) xs
   => Bool -> RecordOf Sized xs -> Eff (GlassyEffs (RecordOf WrapState xs)
     (VariantOf WrapEvent xs)) (Eff HolzEffs ())
 pollRec horiz rec = do
-  box <- askEff #box
+  box <- askEff _box
   states <- get
   (states', Endo act) <- runWriterT $ withSubbox horiz box rec $ \i a box' -> do
-    ((m, s'), es) <- lift $ localEff #box (const box')
+    ((m, s'), es) <- lift $ localEff _box (const box')
       $ castEff
       $ enumWriterEff
       $ poll a `runStateDef` unwrapState (getField $ hindex states i)
     tell $ Endo $ (>>m)
-    mapM_ (lift . tellEff #event . EmbedAt i . Field . WrapEvent) es
+    mapM_ (lift . tellEff _event . EmbedAt i . Field . WrapEvent) es
     return $ WrapState s'
   put states'
   return $ castEff $ act $ return ()
@@ -404,7 +421,7 @@ instance (Glassy a, Glassy b) => Glassy (a, b) where
     ((da, s'), es) <- castEff $ enumWriterEff @ "event" $ poll a `runStateDef` s
     ((db, t'), fs) <- castEff $ enumWriterEff @ "event" $ poll b `runStateDef` t
     put (s', t')
-    mapM_ (tellEff #event) $ map Left es ++ map Right fs
+    mapM_ (tellEff _event) $ map Left es ++ map Right fs
     return (da >> db)
 
 data Margin a = MarginTRBL !Float !Float !Float !Float a
@@ -413,7 +430,7 @@ instance Glassy a => Glassy (Margin a) where
   type State (Margin a) = State a
   type Event (Margin a) = Event a
   initialState (MarginTRBL _ _ _ _ a) = initialState a
-  poll (MarginTRBL t r b l a) = localEff #box
+  poll (MarginTRBL t r b l a) = localEff _box
     (\(V2 x0 y0 `Box` V2 x1 y1) -> V2 (x0 + l) (y0 + t) `Box` V2 (x1 - r) (y1 - b))
     (poll a)
 
@@ -425,7 +442,7 @@ instance Glassy Key where
     f <- liftHolz $ keyPress k
     b <- get
     put f
-    when (b /= f) $ tellEff #event f
+    when (b /= f) $ tellEff _event f
     return (return ())
 
 -- | Left mouse button
@@ -439,9 +456,9 @@ instance Glassy LMB where
     f <- liftHolz $ mousePress 0
     b <- get
     put f
-    box <- askEff #box
+    box <- askEff _box
     pos <- liftHolz getCursorPos
-    when (b /= f && Box.isInside pos box) $ tellEff #event f
+    when (b /= f && Box.isInside pos box) $ tellEff _event f
     return (return ())
 
 data Hover = Hover
@@ -452,10 +469,10 @@ instance Glassy Hover where
   initialState _ = False
   poll Hover = do
     b <- get
-    box <- askEff #box
+    box <- askEff _box
     f <- (`Box.isInside` box) <$> liftHolz getCursorPos
     put f
-    when (b /= f) $ tellEff #event f
+    when (b /= f) $ tellEff _event f
     return $ return ()
 
 instance (Event a ~ Bool, Glassy a) => Glassy (Chatter a) where
@@ -469,7 +486,7 @@ instance (Event a ~ Bool, Glassy a) => Glassy (Chatter a) where
           Down x -> (or, x)
     s <- get
     ((m, s'), es) <- castEff $ enumWriterEff @ "event" $ poll a `runStateDef` s
-    when (cond es) $ tellEff #event ()
+    when (cond es) $ tellEff _event ()
     put s'
     return m
 
@@ -477,7 +494,7 @@ data Always = Always
 
 instance Glassy Always where
   type Event Always = ()
-  poll _ = return () <$ tellEff #event ()
+  poll _ = return () <$ tellEff _event ()
 
 data TextBox = TextBox
 
@@ -485,7 +502,7 @@ instance Glassy TextBox where
   type State TextBox = Either String (String, Int)
   initialState TextBox = Left ""
   poll TextBox = do
-    box <- askEff #box
+    box <- askEff _box
     cursorIsIn <- (`Box.isInside` box) <$> liftHolz getCursorPos
     btn <- liftHolz $ mousePress 0
     get >>= \case
@@ -511,7 +528,7 @@ clearTextBox (Right _) = Right ("", 0)
 
 activeTextBox :: Eff (GlassyEffs (String, Int) Void) (Eff HolzEffs ())
 activeTextBox = do
-  Box (V2 x0 y0) (V2 x1 y1) <- askEff #box
+  Box (V2 x0 y0) (V2 x1 y1) <- askEff _box
   xs <- liftHolz typedString
   ks <- liftHolz typedKeys
   (str, p) <- get
@@ -527,7 +544,7 @@ activeTextBox = do
   let str' = l ++ xs ++ drop (i + j) r
   let p' = length xs + k - i - j
   put (str', max 0 $ min (length str') $ p')
-  font <- askEff #font
+  font <- askEff _font
   return $ liftHolz $ font `Text.runRenderer` do
     let fg = pure 1
     let size = (y1 - y0) * 2 / 3
