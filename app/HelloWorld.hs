@@ -3,4 +3,4 @@ module Main where
 import Glassy
 
 main :: IO ()
-main = start $ Str white "Hello, world"
+main = start defaultGlassyConfig $ Str white "Hello, world"

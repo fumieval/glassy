@@ -23,12 +23,12 @@ fadeout str = Auto
   }
 
 main :: IO ()
-main = start $ (,) (fillRGBA 0.14 0.19 0.22 1) $ Auto
+main = start defaultGlassyConfig $ (,) (fillRGBA 0.14 0.19 0.22 1) $ Auto
   { autoWatch = (Always, Down KeyEnter)
   , autoUpdate = \e s -> case e of
     -- Always filter the list
     Left _ -> s & #list %~ filter (\x -> x
-      ^. rowItemState
+      ^. elemState
       . _2 -- the second element is `fadeout`
       . autoState
       . transitState /= TEnd)
@@ -36,7 +36,7 @@ main = start $ (,) (fillRGBA 0.14 0.19 0.22 1) $ Auto
     Right _ -> case s ^. #box . _2 . to textBoxText of
       "" -> s
       str -> s
-        & #list %~ insertRows (hover 0.22 0.28 0.35, fadeout str)
+        & #list %~ insertElem (hover 0.22 0.28 0.35, fadeout str)
         & #box . _2 %~ clearTextBox
   , autoView = VRec
     $ #box @:> Sized 0.1 (fillRGBA 0.3 0.3 0.35 1, TextBox)

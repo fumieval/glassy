@@ -37,10 +37,11 @@ resolver: lts-10.4
 # will not be run. This is useful for tweaking upstream packages.
 packages:
 - '.'
-- location:
-    git: https://github.com/fumieval/holz
-    commit: af28c610bca247dea3e7fefd0da90a687cc977d8
-  extra-dep: true
+- '../holz'
+#- location:
+#    git: https://github.com/fumieval/holz
+#    commit: af28c610bca247dea3e7fefd0da90a687cc977d8
+#  extra-dep: true
 
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)

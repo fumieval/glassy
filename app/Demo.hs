@@ -16,7 +16,7 @@ hover r g b = Auto
   }
 
 main :: IO ()
-main = start $ VRec
+main = start defaultGlassyConfig $ VRec
   $ #counter @= Auto
     { autoWatch = Down LMB
     , autoView = (hover 0.4 0.52 0.33, Show 0)

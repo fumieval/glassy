@@ -5,10 +5,12 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE LambdaCase #-}
 module Glassy (Glassy(..)
   , start
-  , liftHolz
+  , GlassyConfig(..)
+  , defaultGlassyConfig
   -- * Basic types
   , Str(..)
   , Glassy.Show(..)
@@ -60,12 +62,12 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.State.Class
 import Control.Monad.Trans.Class
-import Control.Monad.Trans.Reader
+import Control.Monad.RWS.Strict
+import Control.Monad.Reader
 import Control.Monad.Trans.State (StateT(..), evalStateT)
 import Control.Monad.Writer
 import qualified Data.BoundingBox as Box
 import Data.Extensible hiding (State)
-import Data.Extensible.Effect.Default
 import Data.List (foldl')
 import Data.Proxy
 import Data.Time.Clock
@@ -78,17 +80,27 @@ import qualified System.Info as Info
 import Glassy.Color
 import Glassy.Transitive
 
-_box :: Proxy "box"
-_box = Proxy
+data GlassyEnv = GlassyEnv
+  { gShader :: !Shader
+  , gWindow :: !Window
+  , gFont :: !Text.Renderer
+  , gBox :: !(Box V2 Float)
+  }
+instance HasWindow GlassyEnv where
+  getWindow = gWindow
+instance HasShader GlassyEnv where
+  getShader = gShader
 
-_holzShader :: Proxy "holzShader"
-_holzShader = Proxy
+data GlassyConfig = GlassyConfig
+  { framesPerSecond :: !Double
+  , defaultSize :: V2 Float
+  }
 
-_holzWindow :: Proxy "holzWindow"
-_holzWindow = Proxy
-
-_font :: Proxy "font"
-_font = Proxy
+defaultGlassyConfig :: GlassyConfig
+defaultGlassyConfig = GlassyConfig
+  { framesPerSecond = 30
+  , defaultSize = V2 640 480
+  }
 
 _event :: Proxy "event"
 _event = Proxy
@@ -96,16 +108,7 @@ _event = Proxy
 _close :: Proxy "close"
 _close = Proxy
 
-type HolzEffs =
-  [ "holzShader" >: ReaderEff Shader
-  , "holzWindow" >: ReaderEff Window
-  , "font" >: ReaderEff Text.Renderer
-  , "IO" >: IO]
-
-type GlassyEffs s e = StateDef s
-    ': ("event" >: WriterEff e)
-    ': ("box" >: ReaderEff (Box V2 Float))
-    ': HolzEffs
+type HolzM = ReaderT GlassyEnv IO
 
 class Glassy a where
   type State a
@@ -117,50 +120,41 @@ class Glassy a where
   default initialState :: (State a ~ ()) => a -> State a
   initialState _ = ()
 
-  poll :: a -> Eff (GlassyEffs (State a) (Event a)) (Eff HolzEffs ())
+  poll :: a -> GlassyEffs (State a) (Event a) (HolzM ())
   poll _ = return $ return ()
 
-start :: forall a. Glassy a => a -> IO ()
-start a = withHolz $ do
-  win <- openWindow Resizable $ Box (V2 0 0) (V2 640 480)
+start :: Glassy a => GlassyConfig -> a -> IO ()
+start GlassyConfig{..} body = withHolz $ do
+  win <- openWindow Resizable $ Box (V2 0 0) defaultSize
   sh <- makeShader
   font <- case Info.os of
     "linux" -> Text.typewriter "/usr/share/fonts/truetype/takao-gothic/TakaoPGothic.ttf"
     "darwin" -> Text.typewriter "/System/Library/Fonts/LucidaGrande.ttc"
     "windows" -> Text.typewriter "C:\\Windows\\Fonts\\segoeui.ttf"
     _ -> fail "Unsupported"
-  void $ retractEff @ "IO"
-    $ runMaybeEff @ "close"
-    $ runReaderEff @ "font" ?? font
-    $ runReaderEff @ "holzWindow" ?? win
-    $ execStateEff @ "State" ?? initialState a
-    $ forever $ do
-      t0 <- liftIO getCurrentTime
-      withFrame win $ runReaderEff @ "holzShader" ?? sh $ do
-        box <- liftHolz $ do
-          setOrthographic
-          getBoundingBox
-        runReaderEff @ "box" ?? box $ do
-          m <- pipeWriterEff @ "event" (const $ return ()) $ castEff $ poll a
-          castEff m
-      t1 <- liftIO getCurrentTime
-      liftIO $ threadDelay $ floor $ (*1e6)
-        $ 1 / 30 - (realToFrac (diffUTCTime t1 t0) :: Double)
-      shouldClose <- runReaderT windowShouldClose win
-      when shouldClose $ throwEff _close ()
+  let env = GlassyEnv
+        { gShader = sh
+        , gWindow = win
+        , gFont = font
+        , gBox = pure 0
+        }
+  flip fix (initialState body) $ \self' s -> join $ withFrame win $ flip runReaderT env $ do
+    t0 <- liftIO getCurrentTime
+    setOrthographic
+    box <- getBoundingBox
+    (cont, s', _) <- lift $ runRWST (poll body) env { gBox = box } s
+    cont
+    t1 <- liftIO getCurrentTime
+    liftIO $ threadDelay $ floor $ (*1e6)
+      $ 1 / framesPerSecond - (realToFrac (diffUTCTime t1 t0) :: Double)
+    shouldClose <- runReaderT windowShouldClose win
+    return $ if shouldClose then pure () else self' s'
 
-liftHolz :: (Associate "holzShader" (ReaderEff Shader) xs
-  , Associate "holzWindow" (ReaderEff Window) xs
-  , Associate "IO" IO xs)
-  => ShaderT (ReaderT Window IO) a -> Eff xs a
-liftHolz m = do
-  sh <- askEff _holzShader
-  win <- askEff _holzWindow
-  liftIO $ runShaderT sh m `runReaderT` win
+type GlassyEffs s e = RWST GlassyEnv [e] s IO
 
 data Str = Str RGBA String
 
-drawStringIn :: Box V2 Float -> Text.Renderer -> RGBA -> String -> ShaderT (ReaderT Window IO) ()
+drawStringIn :: (MonadHolz r m, HasShader r) => Box V2 Float -> Text.Renderer -> RGBA -> String -> m ()
 drawStringIn (Box (V2 x0 y0) (V2 x1 y1)) font fg str = Text.runRenderer font $ do
   let size = (y1 - y0) * 2 / 3
   Text.string size fg str
@@ -174,11 +168,11 @@ instance Glassy Str where
   type State Str = String
   initialState (Str _ s) = s
   poll (Str fg _) = do
-    box <- askEff _box
+    box <- asks gBox
     s <- get
     return $ do
-      font <- askEff _font
-      liftHolz $ drawStringIn box font fg s
+      font <- asks gFont
+      drawStringIn box font fg s
 
 -- | Hide overflow
 newtype Frame a = Frame { getFrame :: a }
@@ -188,58 +182,14 @@ instance Glassy a => Glassy (Frame a) where
   type Event (Frame a) = Event a
   initialState (Frame a) = initialState a
   poll (Frame a) = do
-    box@(Box (V2 x0 y0) (V2 x1 y1)) <- askEff _box
+    box@(Box (V2 x0 y0) (V2 x1 y1)) <- asks gBox
     m <- poll a
     return $ do
-      liftHolz $ do
+      do
         setViewport box
         setProjection $ ortho x0 x1 y1 y0 (-1) 1
       m
-      liftHolz setOrthographic
-
-insertElem :: Glassy a => a -> [ElemState a] -> [ElemState a]
-insertElem a = flip snoc $ ElemState a (initialState a)
-
-data ElemState a = ElemState !a !(State a)
-
-elemState :: Lens' (ElemState a) (State a)
-elemState f (ElemState a s) = ElemState a <$> f s
-
-data Rows a = Rows
-
-data Columns a = Columns
-
-instance Glassy a => Glassy (Rows a) where
-  type State (Rows a) = [ElemState a]
-  type Event (Rows a) = Event a
-  initialState _ = []
-  poll Rows = do
-    Box (V2 x0 y0) (V2 x1 y1) <- askEff _box
-    ss <- get
-    let h = (y1 - y0) / fromIntegral (length ss)
-    let ys = [y0, y0+h..]
-    (ms, ss') <- fmap unzip $ forM (zip3 ys (tail ys) ss)
-      $ \(y, y', ElemState a s) -> castEff
-        $ localEff _box (const $ Box (V2 x0 y) (V2 x1 y'))
-        $ poll a `runStateDef` s
-    put $ zipWith (\(ElemState a _) s -> ElemState a s) ss ss'
-    return $ sequence_ ms
-
-instance Glassy a => Glassy (Columns a) where
-  type State (Columns a) = [ElemState a]
-  type Event (Columns a) = Event a
-  initialState _ = []
-  poll Columns = do
-    Box (V2 x0 y0) (V2 x1 y1) <- askEff _box
-    ss <- get
-    let h = (x1 - x0) / fromIntegral (length ss)
-    let xs = [x0, x0+h..]
-    (ms, ss') <- fmap unzip $ forM (zip3 xs (tail xs) ss)
-      $ \(x, x', ElemState a s) -> castEff
-        $ localEff _box (const $ Box (V2 x y0) (V2 x' y1))
-        $ poll a `runStateDef` s
-    put $ zipWith (\(ElemState a _) s -> ElemState a s) ss ss'
-    return $ sequence_ ms
+      setOrthographic
 
 newtype Show a = Show { getShow :: a }
   deriving (Bounded, Enum, Eq, Floating, Fractional, Integral, Monoid, Num, Ord
@@ -249,82 +199,21 @@ instance Prelude.Show a => Glassy (Glassy.Show a) where
   type State (Glassy.Show a) = a
   initialState (Show a) = a
   poll _ = do
-    box <- askEff _box
+    box <- asks gBox
     a <- get
     return $ do
-      font <- askEff _font
-      liftHolz $ drawStringIn box font (pure 1) $ show a
+      font <- asks gFont
+      drawStringIn box font (pure 1) $ show a
 
 newtype Fill = Fill { fillColor :: V4 Float } deriving Transitive
 
 instance Glassy Fill where
   poll (Fill bg) = do
-    Box p q <- askEff _box
-    return $ liftHolz $ draw identity $ rectangle (bg & _xyz %~ fromHSV) p q
+    Box p q <- asks gBox
+    return $ draw identity $ rectangle (bg & _xyz %~ fromHSV) p q
 
 fillRGBA :: Float -> Float -> Float -> Float -> Fill
 fillRGBA r g b a = Fill $ let V3 h s v = toHSV (V3 r g b) in V4 h s v a
-
-instance Glassy a => Glassy (Eff HolzEffs a) where
-  type State (Eff HolzEffs a) = Maybe (State a)
-  type Event (Eff HolzEffs a) = Event a
-  initialState _ = Nothing
-  poll m = do
-    a <- castEff m
-    s <- maybe (initialState a) id <$> get
-    (n, s') <- castEff $ runStateDef (poll a) s
-    put $ Just s'
-    return n
-
-newtype Self a = Self a
-
-instance Glassy a => Glassy (Self a) where
-  type State (Self a) = (a, State a)
-  type Event (Self a) = Event a
-  initialState (Self a) = (a, initialState a)
-  poll (Self _) = do
-    (a, s) <- get
-    (m, s') <- castEff $ poll a `runStateDef` s
-    put (a, s')
-    return m
-
--- | Accessor for the 'Self' state
-self :: Lens' (a, b) a
-self = _1
-
-pipeWriterEff :: forall k w xs a. (w -> Eff xs ())
-  -> Eff (k >: WriterEff w ': xs) a
-  -> Eff xs a
-pipeWriterEff p = peelEff0 return $ \(w, a) k -> p w >> k a
-
-enumWriterEff :: forall k w xs a. Eff (k >: WriterEff w ': xs) a
-  -> Eff xs (a, [w])
-enumWriterEff = peelEff1 (\a k -> return (a, k [])) (\(w, a) k f -> k a $ (w:) . f)
-  `flip` id
-
-data Auto w a = Auto
-  { autoWatch :: w -- ^ the target to watch
-  , autoView :: a -- ^ display
-  , autoUpdate :: Event w -> State a -> State a -- update its own state.
-  }
-
-data AutoState w a = AutoState !(State w) (State a)
-
-instance (Glassy w, Glassy a) => Glassy (Auto w a) where
-  type State (Auto w a) = AutoState w a
-  type Event (Auto w a) = Event a
-  initialState (Auto w a _) = AutoState (initialState w) (initialState a)
-  poll (Auto w v u) = do
-    AutoState ws vs <- get
-    ((n, ws'), es) <- castEff $ enumWriterEff $ poll w `runStateDef` ws
-    let !vs' = foldr u vs es
-    ((m, vs''), os) <- castEff $ enumWriterEff $ poll v `runStateDef` vs'
-    put $ AutoState ws' vs''
-    mapM_ (tellEff _event) os
-    return (n >> m)
-
-autoState :: Lens' (AutoState w a) (State a)
-autoState f (AutoState w a) = AutoState w <$> f a
 
 newtype VRec (xs :: [Assoc Symbol *]) = VRec { getVRec :: RecordOf Sized xs }
 
@@ -381,21 +270,21 @@ initRec rec = htabulateFor (Proxy :: Proxy (KeyValue KnownSymbol Glassy))
     Unsized a -> a
 
 pollRec :: Forall (KeyValue KnownSymbol Glassy) xs
-  => Bool -> RecordOf Sized xs -> Eff (GlassyEffs (RecordOf WrapState xs)
-    (VariantOf WrapEvent xs)) (Eff HolzEffs ())
+  => Bool -> RecordOf Sized xs -> GlassyEffs (RecordOf WrapState xs)
+    (VariantOf WrapEvent xs) (HolzM ())
 pollRec horiz rec = do
-  box <- askEff _box
+  box <- asks gBox
   states <- get
   (states', Endo act) <- runWriterT $ withSubbox horiz box rec $ \i a box' -> do
-    ((m, s'), es) <- lift $ localEff _box (const box')
-      $ castEff
-      $ enumWriterEff
-      $ poll a `runStateDef` unwrapState (getField $ hindex states i)
+    env <- ask
+    (m, s', es) <- lift $ lift
+        $ runRWST (poll a) env {gBox = box'}
+        $ unwrapState (getField $ hindex states i)
     tell $ Endo $ (>>m)
-    mapM_ (lift . tellEff _event . EmbedAt i . Field . WrapEvent) es
+    mapM_ (lift . tell . pure . EmbedAt i . Field . WrapEvent) es
     return $ WrapState s'
   put states'
-  return $ castEff $ act $ return ()
+  return $ act $ return ()
 
 instance Forall (KeyValue KnownSymbol Glassy) xs => Glassy (VRec xs) where
   type State (VRec xs) = RecordOf WrapState xs
@@ -411,18 +300,11 @@ instance Forall (KeyValue KnownSymbol Glassy) xs => Glassy (HRec xs) where
   initialState = initRec . getHRec
   poll = pollRec True . getHRec
 
-instance (Glassy a, Glassy b) => Glassy (a, b) where
-  type State (a, b) = (State a, State b)
-  type Event (a, b) = Either (Event a) (Event b)
-  initialState (a, b) = (initialState a, initialState b)
-
-  poll (a, b) = do
-    (s, t) <- get
-    ((da, s'), es) <- castEff $ enumWriterEff @ "event" $ poll a `runStateDef` s
-    ((db, t'), fs) <- castEff $ enumWriterEff @ "event" $ poll b `runStateDef` t
-    put (s', t')
-    mapM_ (tellEff _event) $ map Left es ++ map Right fs
-    return (da >> db)
+data Auto w a = Auto
+  { autoWatch :: w -- ^ the target to watch
+  , autoView :: a -- ^ display
+  , autoUpdate :: Event w -> State a -> State a -- update its own state.
+  }
 
 data Margin a = MarginTRBL !Float !Float !Float !Float a
 
@@ -430,19 +312,117 @@ instance Glassy a => Glassy (Margin a) where
   type State (Margin a) = State a
   type Event (Margin a) = Event a
   initialState (MarginTRBL _ _ _ _ a) = initialState a
-  poll (MarginTRBL t r b l a) = localEff _box
-    (\(V2 x0 y0 `Box` V2 x1 y1) -> V2 (x0 + l) (y0 + t) `Box` V2 (x1 - r) (y1 - b))
+  poll (MarginTRBL t r b l a) = local
+    (\e -> let V2 x0 y0 `Box` V2 x1 y1 = gBox e
+      in e { gBox = V2 (x0 + l) (y0 + t) `Box` V2 (x1 - r) (y1 - b) })
     (poll a)
+
+data AutoState w a = AutoState !(State w) (State a)
+
+instance (Glassy w, Glassy a) => Glassy (Auto w a) where
+  type State (Auto w a) = AutoState w a
+  type Event (Auto w a) = Event a
+  initialState (Auto w a _) = AutoState (initialState w) (initialState a)
+  poll (Auto w v u) = do
+    env <- ask
+    AutoState ws vs <- get
+    (n, ws', es) <- lift $ runRWST (poll w) env ws
+    let !vs' = foldr u vs es
+    (m, vs'', os) <- lift $ runRWST (poll v) env vs'
+    put $ AutoState ws' vs''
+    tell os
+    return (n >> m)
+
+autoState :: Lens' (AutoState w a) (State a)
+autoState f (AutoState w a) = AutoState w <$> f a
+
+insertElem :: Glassy a => a -> [ElemState a] -> [ElemState a]
+insertElem a = flip snoc $ ElemState a (initialState a)
+
+data ElemState a = ElemState !a !(State a)
+
+elemState :: Lens' (ElemState a) (State a)
+elemState f (ElemState a s) = ElemState a <$> f s
+
+data Rows a = Rows
+
+data Columns a = Columns
+
+instance Glassy a => Glassy (Rows a) where
+  type State (Rows a) = [ElemState a]
+  type Event (Rows a) = Event a
+  initialState _ = []
+  poll Rows = do
+    env <- ask
+    Box (V2 x0 y0) (V2 x1 y1) <- asks gBox
+    ss <- get
+    let h = (y1 - y0) / fromIntegral (length ss)
+    let ys = [y0, y0+h..]
+    (ms, ss', os) <- lift $ fmap unzip3 $ forM (zip3 ys (tail ys) ss)
+      $ \(y, y', ElemState a s) -> runRWST (poll a)
+        env { gBox = Box (V2 x0 y) (V2 x1 y') } s
+    mapM_ tell os
+    put $ zipWith (\(ElemState a _) s -> ElemState a s) ss ss'
+    return $ sequence_ ms
+
+instance Glassy a => Glassy (Columns a) where
+  type State (Columns a) = [ElemState a]
+  type Event (Columns a) = Event a
+  initialState _ = []
+  poll Columns = do
+    env <- ask
+    Box (V2 x0 y0) (V2 x1 y1) <- asks gBox
+    ss <- get
+    let h = (x1 - x0) / fromIntegral (length ss)
+    let xs = [x0, x0+h..]
+    (ms, ss', os) <- lift $ fmap unzip3 $ forM (zip3 xs (tail xs) ss)
+      $ \(x, x', ElemState a s) -> runRWST (poll a)
+        env { gBox = Box (V2 x y0) (V2 x' y1) } s
+    mapM_ tell os
+    put $ zipWith (\(ElemState a _) s -> ElemState a s) ss ss'
+    return $ sequence_ ms
+
+newtype Self a = Self a
+
+instance Glassy a => Glassy (Self a) where
+  type State (Self a) = (a, State a)
+  type Event (Self a) = Event a
+  initialState (Self a) = (a, initialState a)
+  poll (Self _) = do
+    (a, s) <- get
+    env <- ask
+    (m, s', e) <- liftIO $ runRWST (poll a) env s
+    put (a, s')
+    tell e
+    return m
+
+-- | Accessor for the 'Self' state
+self :: Lens' (a, b) a
+self = _1
+
+instance (Glassy a, Glassy b) => Glassy (a, b) where
+  type State (a, b) = (State a, State b)
+  type Event (a, b) = Either (Event a) (Event b)
+  initialState (a, b) = (initialState a, initialState b)
+
+  poll (a, b) = do
+    env <- ask
+    (s, t) <- get
+    (da, s', es) <- lift $ runRWST (poll a) env s
+    (db, t', fs) <- lift $ runRWST (poll b) env t
+    put (s', t')
+    tell $ map Left es ++ map Right fs
+    return (da >> db)
 
 instance Glassy Key where
   type State Key = Bool
   type Event Key = Bool
   initialState _ = False
   poll k = do
-    f <- liftHolz $ keyPress k
+    f <- keyPress k
     b <- get
     put f
-    when (b /= f) $ tellEff _event f
+    when (b /= f) $ tell [f]
     return (return ())
 
 -- | Left mouse button
@@ -453,12 +433,12 @@ instance Glassy LMB where
   type Event LMB = Bool
   initialState _ = False
   poll LMB = do
-    f <- liftHolz $ mousePress 0
+    f <- mousePress 0
     b <- get
     put f
-    box <- askEff _box
-    pos <- liftHolz getCursorPos
-    when (b /= f && Box.isInside pos box) $ tellEff _event f
+    box <- asks gBox
+    pos <- getCursorPos
+    when (b /= f && Box.isInside pos box) $ tell [f]
     return (return ())
 
 data Hover = Hover
@@ -469,10 +449,10 @@ instance Glassy Hover where
   initialState _ = False
   poll Hover = do
     b <- get
-    box <- askEff _box
-    f <- (`Box.isInside` box) <$> liftHolz getCursorPos
+    box <- asks gBox
+    f <- (`Box.isInside` box) <$> getCursorPos
     put f
-    when (b /= f) $ tellEff _event f
+    when (b /= f) $ tell [f]
     return $ return ()
 
 instance (Event a ~ Bool, Glassy a) => Glassy (Chatter a) where
@@ -481,12 +461,13 @@ instance (Event a ~ Bool, Glassy a) => Glassy (Chatter a) where
   initialState (Up a) = initialState a
   initialState (Down a) = initialState a
   poll t = do
+    env <- ask
     let (cond, a) = case t of
           Up x -> (any not, x)
           Down x -> (or, x)
     s <- get
-    ((m, s'), es) <- castEff $ enumWriterEff @ "event" $ poll a `runStateDef` s
-    when (cond es) $ tellEff _event ()
+    (m, s', es) <- lift $ runRWST (poll a) env s
+    when (cond es) $ tell [()]
     put s'
     return m
 
@@ -494,7 +475,7 @@ data Always = Always
 
 instance Glassy Always where
   type Event Always = ()
-  poll _ = return () <$ tellEff _event ()
+  poll _ = return () <$ tell [()]
 
 data TextBox = TextBox
 
@@ -502,20 +483,28 @@ instance Glassy TextBox where
   type State TextBox = Either String (String, Int)
   initialState TextBox = Left ""
   poll TextBox = do
-    box <- askEff _box
-    cursorIsIn <- (`Box.isInside` box) <$> liftHolz getCursorPos
-    btn <- liftHolz $ mousePress 0
+    box <- asks gBox
+    cursorIsIn <- (`Box.isInside` box) <$> getCursorPos
+    btn <- mousePress 0
+    env <- ask
     get >>= \case
       Left str -> do
         when (btn && cursorIsIn) $ put $ Right (str, length str)
-        castEff $ poll (Str (pure 1) str) `evalStateDef` str
+        (m, s', os) <- lift $ runRWST (poll (Str (pure 1) str)) env str
+        put (Left s')
+        tell os
+        return m
       Right s@(str, _)
         | btn && not cursorIsIn -> do
           put (Left str)
-          castEff $ poll (Str (pure 1) str) `evalStateDef` str
+          (m, s', os) <- lift $ runRWST (poll (Str (pure 1) str)) env str
+          put (Left s')
+          tell os
+          return m
         | otherwise -> do
-          (m, s') <- castEff $ activeTextBox `runStateDef` s
+          (m, s', os) <- lift $ runRWST activeTextBox env s
           put (Right s')
+          tell os
           return m
 
 textBoxText :: State TextBox -> String
@@ -526,11 +515,11 @@ clearTextBox :: State TextBox -> State TextBox
 clearTextBox (Left _) = Left ""
 clearTextBox (Right _) = Right ("", 0)
 
-activeTextBox :: Eff (GlassyEffs (String, Int) Void) (Eff HolzEffs ())
+activeTextBox :: GlassyEffs (String, Int) Void (HolzM ())
 activeTextBox = do
-  Box (V2 x0 y0) (V2 x1 y1) <- askEff _box
-  xs <- liftHolz typedString
-  ks <- liftHolz typedKeys
+  Box (V2 x0 y0) (V2 x1 y1) <- asks gBox
+  xs <- typedString
+  ks <- typedKeys
   (str, p) <- get
   let move (V3 i j k) KeyBackspace = V3 (i + 1) j k
       move (V3 i j k) KeyDelete = V3 i (j + 1) k
@@ -544,8 +533,8 @@ activeTextBox = do
   let str' = l ++ xs ++ drop (i + j) r
   let p' = length xs + k - i - j
   put (str', max 0 $ min (length str') $ p')
-  font <- askEff _font
-  return $ liftHolz $ font `Text.runRenderer` do
+  font <- asks gFont
+  return $ font `Text.runRenderer` do
     let fg = pure 1
     let size = (y1 - y0) * 2 / 3
     let (sl, sr) = splitAt p' str'
@@ -584,24 +573,30 @@ instance (Glassy a) => Glassy (Transit a) where
   type State (Transit a) = (TransitionState, State a)
   type Event (Transit a) = Event a
   initialState (Transit _ f) = (TBeginning, initialState $ f 0)
-  poll (Transit dur f) = get >>= \case
-    (TBeginning, s) -> do
-      (m, s') <- castEff $ runStateEff (poll $ f 0) s
-      put (TBeginning, s')
-      return m
-    (TIn k, s) -> do
-      (m, s') <- castEff $ runStateEff (poll $ f k) s
-      if k < 1
-        then put (TIn (k + 1 / fromIntegral dur), s')
-        else put (TEnd, s')
-      return m
-    (TOut k, s) -> do
-      (m, s') <- castEff $ runStateEff (poll $ f k) s
-      if k > 0
-        then put (TOut (k - 1 / fromIntegral dur), s')
-        else put (TBeginning, s')
-      return m
-    (TEnd, s) -> do
-      (m, s') <- castEff $ runStateEff (poll $ f 1) s
-      put (TEnd, s')
-      return m
+  poll (Transit dur f) = do
+    env <- ask
+    get >>= \case
+      (TBeginning, s) -> do
+        (m, s', os) <- lift $ runRWST (poll $ f 0) env s
+        put (TBeginning, s')
+        tell os
+        return m
+      (TIn k, s) -> do
+        (m, s', os) <- lift $ runRWST (poll $ f k) env s
+        if k < 1
+          then put (TIn (k + 1 / fromIntegral dur), s')
+          else put (TEnd, s')
+        tell os
+        return m
+      (TOut k, s) -> do
+        (m, s', os) <- lift $ runRWST (poll $ f k) env s
+        if k > 0
+          then put (TOut (k - 1 / fromIntegral dur), s')
+          else put (TBeginning, s')
+        tell os
+        return m
+      (TEnd, s) -> do
+        (m, s', os) <- lift $ runRWST (poll $ f 1) env s
+        put (TEnd, s')
+        tell os
+        return m
