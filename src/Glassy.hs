@@ -102,12 +102,6 @@ defaultGlassyConfig = GlassyConfig
   , defaultSize = V2 640 480
   }
 
-_event :: Proxy "event"
-_event = Proxy
-
-_close :: Proxy "close"
-_close = Proxy
-
 type HolzM = ReaderT GlassyEnv IO
 
 class Glassy a where
