@@ -1,16 +1,10 @@
-{-# LANGUAGE BangPatterns, TypeFamilies, ScopedTypeVariables, Rank2Types #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE FlexibleContexts, FlexibleInstances, DefaultSignatures #-}
-{-# LANGUAGE DataKinds, KindSignatures, TypeOperators #-}
-{-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE LambdaCase #-}
-module Glassy (Glassy(..)
+module Glassy (Widget(..)
   , start
   , GlassyConfig(..)
   , defaultGlassyConfig
+  {-
   -- * Basic types
   , Str(..)
   , Glassy.Show(..)
@@ -53,57 +47,56 @@ module Glassy (Glassy(..)
   , textBoxText
   , clearTextBox
   -- * reexport
-  , module Glassy.Color)
+  , module Glassy.Color -})
   where
 
-import Control.Concurrent (threadDelay)
-import Control.Lens
-import Control.Monad
-import Control.Monad.IO.Class
-import Control.Monad.State.Class
-import Control.Monad.Trans.Class
-import Control.Monad.RWS.Strict
-import Control.Monad.Reader
-import Control.Monad.Trans.State (StateT(..), evalStateT)
-import Control.Monad.Writer
-import qualified Data.BoundingBox as Box
-import Data.Extensible hiding (State)
-import Data.List (foldl')
-import Data.Proxy
-import Data.Time.Clock
-import Data.Void
-import GHC.TypeLits
-import Graphics.Holz
+import Glassy.Core
 import Linear
-import qualified Graphics.Holz.Text as Text
-import qualified System.Info as Info
-import Glassy.Color
-import Glassy.Transitive
+import Control.Monad.Reader
+import Data.Monoid
+import Data.BoundingBox
 
-data GlassyEnv = GlassyEnv
-  { gShader :: !Shader
-  , gWindow :: !Window
-  , gFont :: !Text.Renderer
-  , gBox :: !(Box V2 Float)
-  }
-instance HasWindow GlassyEnv where
-  getWindow = gWindow
-instance HasShader GlassyEnv where
-  getShader = gShader
-
-data GlassyConfig = GlassyConfig
-  { framesPerSecond :: !Double
-  , defaultSize :: V2 Float
+newtype Widget a b = Widget
+  { runWidget :: a -> GlassyM (b, GlassyM (), Widget a b)
   }
 
-defaultGlassyConfig :: GlassyConfig
-defaultGlassyConfig = GlassyConfig
-  { framesPerSecond = 30
-  , defaultSize = V2 640 480
+type RGBA = V4 Float
+
+text :: Monoid b => Widget s (RGBA, String) b
+text = Widget $ \a -> do
+    let (fg, s) = f a
+    box <- asks gBox
+    font <- asks gFont
+    return (mempty, drawStringIn box font fg s, text)
+
+rows :: Widget a b -> Widget [a] [b]
+rows inner = go [] where
+  go ws = Widget $ \xs -> do
+    env <- ask
+    Box (V2 x0 y0) (V2 x1 y1) <- asks gBox
+    let h = (y1 - y0) / fromIntegral (length ss)
+    let ys = [y0, y0+h..]
+    (rs, ms, ws') <- fmap unzip3 $ forM (zip4 ys (tail ys) xs $ ws ++ repeat inner)
+      $ \(y, y', s, w) -> withBox (Box (V2 x0 y) (V2 x1 y'))
+        $ runWidget w s
+    return (rs, sequence_ ms, ws')
+
+fill :: Monoid b => Widget RGBA b
+fill = Widget $ \bg -> do
+  Box p q <- asks gBox
+  return (mempty, draw identity $ rectangle bg p q, fill)
+{-
+onDown :: Widget a -> (GlassyM a, a -> a) -> Widget a
+onDown widget (m, f) = Widget
+  { stateWidget = (False, stateWidget widget)
+  , runWidget = \(prev, s) a -> do
+    b <- m
+    let () if not prev && b
+      then f
+      else id
   }
-
-type HolzM = ReaderT GlassyEnv IO
-
+-}
+{-
 class Glassy a where
   type State a
   type State a = ()
@@ -114,49 +107,13 @@ class Glassy a where
   default initialState :: (State a ~ ()) => a -> State a
   initialState _ = ()
 
-  poll :: a -> GlassyEffs (State a) (Event a) (HolzM ())
+  poll :: a -> GlassyEffs (State a) (Event a) (GlassyM ())
   poll _ = return $ return ()
-
-start :: Glassy a => GlassyConfig -> a -> IO ()
-start GlassyConfig{..} body = withHolz $ do
-  win <- openWindow Resizable $ Box (V2 0 0) defaultSize
-  sh <- makeShader
-  font <- case Info.os of
-    "linux" -> Text.typewriter "/usr/share/fonts/truetype/takao-gothic/TakaoPGothic.ttf"
-    "darwin" -> Text.typewriter "/System/Library/Fonts/LucidaGrande.ttc"
-    "windows" -> Text.typewriter "C:\\Windows\\Fonts\\segoeui.ttf"
-    _ -> fail "Unsupported"
-  let env = GlassyEnv
-        { gShader = sh
-        , gWindow = win
-        , gFont = font
-        , gBox = pure 0
-        }
-  flip fix (initialState body) $ \self' s -> join $ withFrame win $ flip runReaderT env $ do
-    t0 <- liftIO getCurrentTime
-    setOrthographic
-    box <- getBoundingBox
-    (cont, s', _) <- lift $ runRWST (poll body) env { gBox = box } s
-    cont
-    t1 <- liftIO getCurrentTime
-    liftIO $ threadDelay $ floor $ (*1e6)
-      $ 1 / framesPerSecond - (realToFrac (diffUTCTime t1 t0) :: Double)
-    shouldClose <- runReaderT windowShouldClose win
-    return $ if shouldClose then pure () else self' s'
 
 type GlassyEffs s e = RWST GlassyEnv [e] s IO
 
 data Str = Str RGBA String
 
-drawStringIn :: (MonadHolz r m, HasShader r) => Box V2 Float -> Text.Renderer -> RGBA -> String -> m ()
-drawStringIn (Box (V2 x0 y0) (V2 x1 y1)) font fg str = Text.runRenderer font $ do
-  let size = (y1 - y0) * 2 / 3
-  Text.string size fg str
-  V2 x y <- Text.getOffset
-  let k = min 1 $ (x1 - x0) / x
-  Text.render $ translate (V3 (x1 - 4 - k * x) (y0 + (y1 - y0) * 0.75 - k * y) 1)
-    !*! scaled (V4 k k k 1)
-  Text.clear
 
 instance Glassy Str where
   type State Str = String
@@ -265,7 +222,7 @@ initRec rec = htabulateFor (Proxy :: Proxy (KeyValue KnownSymbol Glassy))
 
 pollRec :: Forall (KeyValue KnownSymbol Glassy) xs
   => Bool -> RecordOf Sized xs -> GlassyEffs (RecordOf WrapState xs)
-    (VariantOf WrapEvent xs) (HolzM ())
+    (VariantOf WrapEvent xs) (GlassyM ())
 pollRec horiz rec = do
   box <- asks gBox
   states <- get
@@ -484,8 +441,7 @@ instance Glassy TextBox where
     get >>= \case
       Left str -> do
         when (btn && cursorIsIn) $ put $ Right (str, length str)
-        (m, s', os) <- lift $ runRWST (poll (Str (pure 1) str)) env str
-        put (Left s')
+        (m, _, os) <- lift $ runRWST (poll (Str (pure 1) str)) env str
         tell os
         return m
       Right s@(str, _)
@@ -509,7 +465,7 @@ clearTextBox :: State TextBox -> State TextBox
 clearTextBox (Left _) = Left ""
 clearTextBox (Right _) = Right ("", 0)
 
-activeTextBox :: GlassyEffs (String, Int) Void (HolzM ())
+activeTextBox :: GlassyEffs (String, Int) Void (GlassyM ())
 activeTextBox = do
   Box (V2 x0 y0) (V2 x1 y1) <- asks gBox
   xs <- typedString
@@ -594,3 +550,4 @@ instance (Glassy a) => Glassy (Transit a) where
         put (TEnd, s')
         tell os
         return m
+-}
